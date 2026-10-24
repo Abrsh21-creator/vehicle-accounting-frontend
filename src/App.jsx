@@ -167,11 +167,12 @@ function App() {
   }, []);
 
   // ============================================================================
-  // FINANCIAL CALCULATION ENGINE
+  // FINANCIAL CALCULATION ENGINE - DIRECT PERCENTAGE DEDUCTION METHOD
   // ============================================================================
 
   /**
-   * Calculate all financial distributions and net payouts
+   * Calculate all financial distributions and net payouts using direct percentage deduction
+   * Each shareholder's expenses (Bank Loan & Misc) are deducted as their direct percentage share
    * @returns {Object} Complete calculation breakdown for all shareholders
    */
   const calculateFinancials = () => {
@@ -187,62 +188,70 @@ function App() {
     const smenehPrev = safeParseFloat(smenehPrevBalance);
     const kesYeshalemPrev = safeParseFloat(kesYeshalemPrevBalance);
 
-    // STEP 1: Calculate Gross Income Share per Shareholder
+    // ========================================================================
+    // DIRECT PERCENTAGE DEDUCTION METHOD
+    // ========================================================================
+    
+    // AMSALU (15.6% Shareholder / Assistant)
+    // Formula: (Income × 15.6%) + Salary - Equb - (Bank × 15.6%) - (Misc × 15.6%) + Previous Balance
     const amsaluGrossShare = (income * SHAREHOLDERS.amsalu.sharePercent) / 100;
+    const amsaluBankShare = (bankPayment * SHAREHOLDERS.amsalu.sharePercent) / 100;
+    const amsaluMiscShare = (misc * SHAREHOLDERS.amsalu.sharePercent) / 100;
+    const amsaluNet = amsaluGrossShare + amsaluSal - amsaluEq - amsaluBankShare - amsaluMiscShare + amsaluPrev;
+
+    // SMENEH (12.6% Shareholder / Driver)
+    // Formula: (Income × 12.6%) + Salary - Equb - (Bank × 12.6%) - (Misc × 12.6%) + Previous Balance
     const smenehGrossShare = (income * SHAREHOLDERS.smeneh.sharePercent) / 100;
+    const smenehBankShare = (bankPayment * SHAREHOLDERS.smeneh.sharePercent) / 100;
+    const smenehMiscShare = (misc * SHAREHOLDERS.smeneh.sharePercent) / 100;
+    const smenehNet = smenehGrossShare + smenehSal - smenehEq - smenehBankShare - smenehMiscShare + smenehPrev;
+
+    // KES YESHALEM (71.8% Shareholder / Main Owner)
+    // Formula: (Income × 71.8%) - (Bank × 71.8%) - (Misc × 71.8%) + Previous Balance
     const kesYeshalemGrossShare = (income * SHAREHOLDERS.kesYeshalem.sharePercent) / 100;
+    const kesYeshalemBankShare = (bankPayment * SHAREHOLDERS.kesYeshalem.sharePercent) / 100;
+    const kesYeshalemMiscShare = (misc * SHAREHOLDERS.kesYeshalem.sharePercent) / 100;
+    const kesYeshalemNet = kesYeshalemGrossShare - kesYeshalemBankShare - kesYeshalemMiscShare + kesYeshalemPrev;
 
-    // STEP 2: Calculate Total Shared Expense Pool
-    const totalSharedExpenses = bankPayment + misc + amsaluSal + smenehSal;
-
-    // STEP 3: Distribute Shared Expenses by Share Percentage
-    const amsaluExpenseShare = (totalSharedExpenses * SHAREHOLDERS.amsalu.sharePercent) / 100;
-    const smenehExpenseShare = (totalSharedExpenses * SHAREHOLDERS.smeneh.sharePercent) / 100;
-    const kesYeshalemExpenseShare = (totalSharedExpenses * SHAREHOLDERS.kesYeshalem.sharePercent) / 100;
-
-    // STEP 4: Calculate Individual Net Payouts
-    // Amsalu: Gross Share - Expense Share + Salary - Equb + Previous Balance
-    const amsaluNet = amsaluGrossShare - amsaluExpenseShare + amsaluSal - amsaluEq + amsaluPrev;
-    
-    // Smeneh: Gross Share - Expense Share + Salary - Equb + Previous Balance
-    const smenehNet = smenehGrossShare - smenehExpenseShare + smenehSal - smenehEq + smenehPrev;
-    
-    // Kes Yeshalem: Gross Share - Expense Share + Previous Balance
-    const kesYeshalemNet = kesYeshalemGrossShare - kesYeshalemExpenseShare + kesYeshalemPrev;
-
-    // Verification: Total net should equal income minus actual expenses
+    // ========================================================================
+    // VERIFICATION: Total net should equal income minus actual expenses
+    // ========================================================================
     const totalNetPayout = amsaluNet + smenehNet + kesYeshalemNet;
     const actualTotalExpenses = bankPayment + misc + amsaluEq + smenehEq;
     const expectedTotal = income - actualTotalExpenses;
 
     return {
       income,
-      totalSharedExpenses,
-      actualTotalExpenses,
+      bankPayment,
+      miscExpenses: misc,
       amsalu: {
         grossShare: amsaluGrossShare,
-        expenseShare: amsaluExpenseShare,
         salary: amsaluSal,
         equb: amsaluEq,
+        bankShare: amsaluBankShare,
+        miscShare: amsaluMiscShare,
         prevBalance: amsaluPrev,
         netPayout: amsaluNet,
       },
       smeneh: {
         grossShare: smenehGrossShare,
-        expenseShare: smenehExpenseShare,
         salary: smenehSal,
         equb: smenehEq,
+        bankShare: smenehBankShare,
+        miscShare: smenehMiscShare,
         prevBalance: smenehPrev,
         netPayout: smenehNet,
       },
       kesYeshalem: {
         grossShare: kesYeshalemGrossShare,
-        expenseShare: kesYeshalemExpenseShare,
+        bankShare: kesYeshalemBankShare,
+        miscShare: kesYeshalemMiscShare,
         prevBalance: kesYeshalemPrev,
         netPayout: kesYeshalemNet,
       },
       verification: {
         totalNetPayout,
+        actualTotalExpenses,
         expectedTotal,
         isBalanced: Math.abs(totalNetPayout - expectedTotal) < 0.01, // Allow 1 cent rounding difference
       },
@@ -769,101 +778,31 @@ function App() {
               {renderLabel('Detailed Financial Breakdown', 'ዝርዝር የፋይናንስ ትንተና')}
             </h2>
 
-            {/* Amsalu Breakdown */}
-            <div className="mb-6 p-4 bg-blue-50 rounded-lg">
-              <h3 className="text-xl font-bold text-gray-800 mb-4">
-                {renderLabel(SHAREHOLDERS.amsalu.name, SHAREHOLDERS.amsalu.nameAm)} {renderLabel('- Calculation Steps', '- የሂሳብ ደረጃዎች')}
-              </h3>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span>{renderLabel('Gross Income Share', 'ጠቅላላ ገቢ ድርሻ')} ({SHAREHOLDERS.amsalu.sharePercent}%):</span>
-                  <span className="font-semibold text-green-600">+{formatCurrency(calculations.amsalu.grossShare)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('Shared Expense Contribution', 'የጋራ ወጪ አስተዋጽኦ')} ({SHAREHOLDERS.amsalu.sharePercent}%):</span>
-                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.amsalu.expenseShare)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('Salary Received', 'የተቀበለው ደሞዝ')}:</span>
-                  <span className="font-semibold text-green-600">+{formatCurrency(calculations.amsalu.salary)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('Equb Deduction', 'እቁብ ቅናሽ')}:</span>
-                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.amsalu.equb)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('Previous Balance', 'የቀደመ ሂሳብ')}:</span>
-                  <span className={`font-semibold ${calculations.amsalu.prevBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {calculations.amsalu.prevBalance >= 0 ? '+' : ''}{formatCurrency(calculations.amsalu.prevBalance)}
-                  </span>
-                </div>
-                <div className="border-t-2 border-gray-300 pt-2 mt-2 flex justify-between text-lg">
-                  <span className="font-bold">{renderLabel('FINAL NET PAYOUT', 'የመጨረሻ ንጹህ ክፍያ')}:</span>
-                  <span className={`font-bold ${calculations.amsalu.netPayout >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {formatCurrency(calculations.amsalu.netPayout)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Smeneh Breakdown */}
-            <div className="mb-6 p-4 bg-purple-50 rounded-lg">
-              <h3 className="text-xl font-bold text-gray-800 mb-4">
-                {renderLabel(SHAREHOLDERS.smeneh.name, SHAREHOLDERS.smeneh.nameAm)} {renderLabel('- Calculation Steps', '- የሂሳብ ደረጃዎች')}
-              </h3>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span>{renderLabel('Gross Income Share', 'ጠቅላላ ገቢ ድርሻ')} ({SHAREHOLDERS.smeneh.sharePercent}%):</span>
-                  <span className="font-semibold text-green-600">+{formatCurrency(calculations.smeneh.grossShare)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('Shared Expense Contribution', 'የጋራ ወጪ አስተዋጽኦ')} ({SHAREHOLDERS.smeneh.sharePercent}%):</span>
-                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.smeneh.expenseShare)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('Salary Received', 'የተቀበለው ደሞዝ')}:</span>
-                  <span className="font-semibold text-green-600">+{formatCurrency(calculations.smeneh.salary)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('Equb Deduction', 'እቁብ ቅናሽ')}:</span>
-                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.smeneh.equb)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('Previous Balance', 'የቀደመ ሂሳብ')}:</span>
-                  <span className={`font-semibold ${calculations.smeneh.prevBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {calculations.smeneh.prevBalance >= 0 ? '+' : ''}{formatCurrency(calculations.smeneh.prevBalance)}
-                  </span>
-                </div>
-                <div className="border-t-2 border-gray-300 pt-2 mt-2 flex justify-between text-lg">
-                  <span className="font-bold">{renderLabel('FINAL NET PAYOUT', 'የመጨረሻ ንጹህ ክፍያ')}:</span>
-                  <span className={`font-bold ${calculations.smeneh.netPayout >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {formatCurrency(calculations.smeneh.netPayout)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Kes Yeshalem Breakdown */}
-            <div className="mb-6 p-4 bg-green-50 rounded-lg">
+            {/* Kes Yeshalem Breakdown - SHOWN FIRST */}
+            <div className="mb-6 p-4 bg-green-50 rounded-lg border-2 border-green-300">
               <h3 className="text-xl font-bold text-gray-800 mb-4">
                 {renderLabel(SHAREHOLDERS.kesYeshalem.name, SHAREHOLDERS.kesYeshalem.nameAm)} {renderLabel('- Calculation Steps', '- የሂሳብ ደረጃዎች')}
               </h3>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span>{renderLabel('Gross Income Share', 'ጠቅላላ ገቢ ድርሻ')} ({SHAREHOLDERS.kesYeshalem.sharePercent}%):</span>
+                  <span>{renderLabel('1. Gross Income Share', '1. ጠቅላላ ገቢ ድርሻ')} ({SHAREHOLDERS.kesYeshalem.sharePercent}%):</span>
                   <span className="font-semibold text-green-600">+{formatCurrency(calculations.kesYeshalem.grossShare)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>{renderLabel('Shared Expense Contribution', 'የጋራ ወጪ አስተዋጽኦ')} ({SHAREHOLDERS.kesYeshalem.sharePercent}%):</span>
-                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.kesYeshalem.expenseShare)}</span>
+                  <span>{renderLabel('2. Bank Loan Direct Share', '2. የባንክ እዳ ቀጥታ ድርሻ')} ({SHAREHOLDERS.kesYeshalem.sharePercent}%):</span>
+                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.kesYeshalem.bankShare)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>{renderLabel('Previous Balance', 'የቀደመ ሂሳብ')}:</span>
+                  <span>{renderLabel('3. Misc Expenses Direct Share', '3. ልዩ ወጪዎች ቀጥታ ድርሻ')} ({SHAREHOLDERS.kesYeshalem.sharePercent}%):</span>
+                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.kesYeshalem.miscShare)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{renderLabel('4. Previous Balance', '4. የቀደመ ሂሳብ')}:</span>
                   <span className={`font-semibold ${calculations.kesYeshalem.prevBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {calculations.kesYeshalem.prevBalance >= 0 ? '+' : ''}{formatCurrency(calculations.kesYeshalem.prevBalance)}
                   </span>
                 </div>
-                <div className="border-t-2 border-gray-300 pt-2 mt-2 flex justify-between text-lg">
+                <div className="border-t-2 border-gray-400 pt-2 mt-2 flex justify-between text-lg">
                   <span className="font-bold">{renderLabel('FINAL NET PAYOUT', 'የመጨረሻ ንጹህ ክፍያ')}:</span>
                   <span className={`font-bold ${calculations.kesYeshalem.netPayout >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {formatCurrency(calculations.kesYeshalem.netPayout)}
@@ -872,23 +811,106 @@ function App() {
               </div>
             </div>
 
-            {/* Summary */}
-            <div className="p-4 bg-gray-100 rounded-lg">
+            {/* Smeneh Breakdown - SHOWN SECOND */}
+            <div className="mb-6 p-4 bg-purple-50 rounded-lg border-2 border-purple-300">
               <h3 className="text-xl font-bold text-gray-800 mb-4">
-                {renderLabel('Summary', 'ማጠቃለያ')}
+                {renderLabel(SHAREHOLDERS.smeneh.name, SHAREHOLDERS.smeneh.nameAm)} {renderLabel('- Calculation Steps', '- የሂሳብ ደረጃዎች')}
+              </h3>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span>{renderLabel('1. Gross Income Share', '1. ጠቅላላ ገቢ ድርሻ')} ({SHAREHOLDERS.smeneh.sharePercent}%):</span>
+                  <span className="font-semibold text-green-600">+{formatCurrency(calculations.smeneh.grossShare)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{renderLabel('2. Salary Received', '2. የተቀበለው ደሞዝ')}:</span>
+                  <span className="font-semibold text-green-600">+{formatCurrency(calculations.smeneh.salary)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{renderLabel('3. Equb Deduction', '3. እቁብ ቅናሽ')}:</span>
+                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.smeneh.equb)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{renderLabel('4. Bank Loan Direct Share', '4. የባንክ እዳ ቀጥታ ድርሻ')} ({SHAREHOLDERS.smeneh.sharePercent}%):</span>
+                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.smeneh.bankShare)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{renderLabel('5. Misc Expenses Direct Share', '5. ልዩ ወጪዎች ቀጥታ ድርሻ')} ({SHAREHOLDERS.smeneh.sharePercent}%):</span>
+                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.smeneh.miscShare)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{renderLabel('6. Previous Balance', '6. የቀደመ ሂሳብ')}:</span>
+                  <span className={`font-semibold ${calculations.smeneh.prevBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {calculations.smeneh.prevBalance >= 0 ? '+' : ''}{formatCurrency(calculations.smeneh.prevBalance)}
+                  </span>
+                </div>
+                <div className="border-t-2 border-gray-400 pt-2 mt-2 flex justify-between text-lg">
+                  <span className="font-bold">{renderLabel('FINAL NET PAYOUT', 'የመጨረሻ ንጹህ ክፍያ')}:</span>
+                  <span className={`font-bold ${calculations.smeneh.netPayout >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {formatCurrency(calculations.smeneh.netPayout)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Amsalu Breakdown - SHOWN THIRD */}
+            <div className="mb-6 p-4 bg-blue-50 rounded-lg border-2 border-blue-300">
+              <h3 className="text-xl font-bold text-gray-800 mb-4">
+                {renderLabel(SHAREHOLDERS.amsalu.name, SHAREHOLDERS.amsalu.nameAm)} {renderLabel('- Calculation Steps', '- የሂሳብ ደረጃዎች')}
+              </h3>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span>{renderLabel('1. Gross Income Share', '1. ጠቅላላ ገቢ ድርሻ')} ({SHAREHOLDERS.amsalu.sharePercent}%):</span>
+                  <span className="font-semibold text-green-600">+{formatCurrency(calculations.amsalu.grossShare)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{renderLabel('2. Salary Received', '2. የተቀበለው ደሞዝ')}:</span>
+                  <span className="font-semibold text-green-600">+{formatCurrency(calculations.amsalu.salary)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{renderLabel('3. Equb Deduction', '3. እቁብ ቅናሽ')}:</span>
+                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.amsalu.equb)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{renderLabel('4. Bank Loan Direct Share', '4. የባንክ እዳ ቀጥታ ድርሻ')} ({SHAREHOLDERS.amsalu.sharePercent}%):</span>
+                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.amsalu.bankShare)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{renderLabel('5. Misc Expenses Direct Share', '5. ልዩ ወጪዎች ቀጥታ ድርሻ')} ({SHAREHOLDERS.amsalu.sharePercent}%):</span>
+                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.amsalu.miscShare)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{renderLabel('6. Previous Balance', '6. የቀደመ ሂሳብ')}:</span>
+                  <span className={`font-semibold ${calculations.amsalu.prevBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {calculations.amsalu.prevBalance >= 0 ? '+' : ''}{formatCurrency(calculations.amsalu.prevBalance)}
+                  </span>
+                </div>
+                <div className="border-t-2 border-gray-400 pt-2 mt-2 flex justify-between text-lg">
+                  <span className="font-bold">{renderLabel('FINAL NET PAYOUT', 'የመጨረሻ ንጹህ ክፍያ')}:</span>
+                  <span className={`font-bold ${calculations.amsalu.netPayout >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {formatCurrency(calculations.amsalu.netPayout)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Summary */}
+            <div className="p-4 bg-gray-100 rounded-lg border-2 border-gray-300">
+              <h3 className="text-xl font-bold text-gray-800 mb-4">
+                {renderLabel('Summary & Verification', 'ማጠቃለያ እና ማረጋገጫ')}
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                 <div>
-                  <p><span className="font-semibold">{renderLabel('Total Income', 'ጠቅላላ ገቢ')}:</span> {formatCurrency(calculations.income)}</p>
-                  <p><span className="font-semibold">{renderLabel('Total Shared Expenses', 'ጠቅላላ የጋራ ወጪዎች')}:</span> {formatCurrency(calculations.totalSharedExpenses)}</p>
-                  <p><span className="font-semibold">{renderLabel('Actual Total Expenses', 'ትክክለኛ ጠቅላላ ወጪዎች')}:</span> {formatCurrency(calculations.actualTotalExpenses)}</p>
+                  <p><span className="font-semibold">{renderLabel('Total Gross Income', 'ጠቅላላ ገቢ')}:</span> {formatCurrency(calculations.income)}</p>
+                  <p><span className="font-semibold">{renderLabel('Bank Loan Payment', 'የባንክ እዳ ክፍያ')}:</span> {formatCurrency(calculations.bankPayment)}</p>
+                  <p><span className="font-semibold">{renderLabel('Misc Expenses', 'ልዩ ወጪዎች')}:</span> {formatCurrency(calculations.miscExpenses)}</p>
+                  <p><span className="font-semibold">{renderLabel('Total Equb Deductions', 'ጠቅላላ እቁብ ቅናሽ')}:</span> {formatCurrency(calculations.actualTotalExpenses)}</p>
                 </div>
                 <div>
-                  <p><span className="font-semibold">{renderLabel('Total Net Payout', 'ጠቅላላ ንጹህ ክፍያ')}:</span> {formatCurrency(calculations.verification.totalNetPayout)}</p>
+                  <p><span className="font-semibold">{renderLabel('Total Net Payouts', 'ጠቅላላ ንጹህ ክፍያዎች')}:</span> {formatCurrency(calculations.verification.totalNetPayout)}</p>
                   <p><span className="font-semibold">{renderLabel('Expected Total', 'የሚጠበቀው ጠቅላላ')}:</span> {formatCurrency(calculations.verification.expectedTotal)}</p>
                   <p className={`font-semibold ${calculations.verification.isBalanced ? 'text-green-600' : 'text-red-600'}`}>
                     {calculations.verification.isBalanced 
-                      ? renderLabel('✓ Balanced', '✓ ሚዛናዊ') 
+                      ? renderLabel('✓ Calculations Balanced', '✓ ሂሳቦች ተመጣጠኑ') 
                       : renderLabel('✗ Not Balanced', '✗ ሚዛናዊ አይደለም')}
                   </p>
                 </div>
