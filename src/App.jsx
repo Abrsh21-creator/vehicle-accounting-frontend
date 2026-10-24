@@ -167,12 +167,13 @@ function App() {
   }, []);
 
   // ============================================================================
-  // FINANCIAL CALCULATION ENGINE - DIRECT PERCENTAGE DEDUCTION METHOD
+  // FINANCIAL CALCULATION ENGINE - DIRECT PERCENTAGE DEDUCTION WITH SHARED SALARIES
   // ============================================================================
 
   /**
-   * Calculate all financial distributions and net payouts using direct percentage deduction
-   * Each shareholder's expenses (Bank Loan & Misc) are deducted as their direct percentage share
+   * Calculate all financial distributions and net payouts
+   * - Bank Loan & Misc Expenses: Direct percentage deduction per shareholder
+   * - Salaries (Amsalu + Smeneh): Treated as shared vehicle expense, ALL shareholders contribute by percentage
    * @returns {Object} Complete calculation breakdown for all shareholders
    */
   const calculateFinancials = () => {
@@ -189,29 +190,39 @@ function App() {
     const kesYeshalemPrev = safeParseFloat(kesYeshalemPrevBalance);
 
     // ========================================================================
-    // DIRECT PERCENTAGE DEDUCTION METHOD
+    // SHARED SALARY POOL - ALL shareholders contribute to total salaries
     // ========================================================================
+    const totalSalaries = amsaluSal + smenehSal;
     
+    // ========================================================================
     // AMSALU (15.6% Shareholder / Assistant)
-    // Formula: (Income × 15.6%) + Salary - Equb - (Bank × 15.6%) - (Misc × 15.6%) + Previous Balance
+    // Formula: (Income × 15.6%) + Salary - Equb - (Bank × 15.6%) - (Misc × 15.6%) - (Total Salaries × 15.6%) + Previous Balance
+    // ========================================================================
     const amsaluGrossShare = (income * SHAREHOLDERS.amsalu.sharePercent) / 100;
     const amsaluBankShare = (bankPayment * SHAREHOLDERS.amsalu.sharePercent) / 100;
     const amsaluMiscShare = (misc * SHAREHOLDERS.amsalu.sharePercent) / 100;
-    const amsaluNet = amsaluGrossShare + amsaluSal - amsaluEq - amsaluBankShare - amsaluMiscShare + amsaluPrev;
+    const amsaluSalaryShare = (totalSalaries * SHAREHOLDERS.amsalu.sharePercent) / 100; // Shared salary contribution
+    const amsaluNet = amsaluGrossShare + amsaluSal - amsaluEq - amsaluBankShare - amsaluMiscShare - amsaluSalaryShare + amsaluPrev;
 
+    // ========================================================================
     // SMENEH (12.6% Shareholder / Driver)
-    // Formula: (Income × 12.6%) + Salary - Equb - (Bank × 12.6%) - (Misc × 12.6%) + Previous Balance
+    // Formula: (Income × 12.6%) + Salary - Equb - (Bank × 12.6%) - (Misc × 12.6%) - (Total Salaries × 12.6%) + Previous Balance
+    // ========================================================================
     const smenehGrossShare = (income * SHAREHOLDERS.smeneh.sharePercent) / 100;
     const smenehBankShare = (bankPayment * SHAREHOLDERS.smeneh.sharePercent) / 100;
     const smenehMiscShare = (misc * SHAREHOLDERS.smeneh.sharePercent) / 100;
-    const smenehNet = smenehGrossShare + smenehSal - smenehEq - smenehBankShare - smenehMiscShare + smenehPrev;
+    const smenehSalaryShare = (totalSalaries * SHAREHOLDERS.smeneh.sharePercent) / 100; // Shared salary contribution
+    const smenehNet = smenehGrossShare + smenehSal - smenehEq - smenehBankShare - smenehMiscShare - smenehSalaryShare + smenehPrev;
 
+    // ========================================================================
     // KES YESHALEM (71.8% Shareholder / Main Owner)
-    // Formula: (Income × 71.8%) - (Bank × 71.8%) - (Misc × 71.8%) + Previous Balance
+    // Formula: (Income × 71.8%) - (Bank × 71.8%) - (Misc × 71.8%) - (Total Salaries × 71.8%) + Previous Balance
+    // ========================================================================
     const kesYeshalemGrossShare = (income * SHAREHOLDERS.kesYeshalem.sharePercent) / 100;
     const kesYeshalemBankShare = (bankPayment * SHAREHOLDERS.kesYeshalem.sharePercent) / 100;
     const kesYeshalemMiscShare = (misc * SHAREHOLDERS.kesYeshalem.sharePercent) / 100;
-    const kesYeshalemNet = kesYeshalemGrossShare - kesYeshalemBankShare - kesYeshalemMiscShare + kesYeshalemPrev;
+    const kesYeshalemSalaryShare = (totalSalaries * SHAREHOLDERS.kesYeshalem.sharePercent) / 100; // Shared salary contribution
+    const kesYeshalemNet = kesYeshalemGrossShare - kesYeshalemBankShare - kesYeshalemMiscShare - kesYeshalemSalaryShare + kesYeshalemPrev;
 
     // ========================================================================
     // VERIFICATION: Total net should equal income minus actual expenses
@@ -224,12 +235,14 @@ function App() {
       income,
       bankPayment,
       miscExpenses: misc,
+      totalSalaries,
       amsalu: {
         grossShare: amsaluGrossShare,
         salary: amsaluSal,
         equb: amsaluEq,
         bankShare: amsaluBankShare,
         miscShare: amsaluMiscShare,
+        salaryShare: amsaluSalaryShare,
         prevBalance: amsaluPrev,
         netPayout: amsaluNet,
       },
@@ -239,6 +252,7 @@ function App() {
         equb: smenehEq,
         bankShare: smenehBankShare,
         miscShare: smenehMiscShare,
+        salaryShare: smenehSalaryShare,
         prevBalance: smenehPrev,
         netPayout: smenehNet,
       },
@@ -246,6 +260,7 @@ function App() {
         grossShare: kesYeshalemGrossShare,
         bankShare: kesYeshalemBankShare,
         miscShare: kesYeshalemMiscShare,
+        salaryShare: kesYeshalemSalaryShare,
         prevBalance: kesYeshalemPrev,
         netPayout: kesYeshalemNet,
       },
@@ -796,8 +811,12 @@ function App() {
                   <span>{renderLabel('3. Misc Expenses Direct Share', '3. ልዩ ወጪዎች ቀጥታ ድርሻ')} ({SHAREHOLDERS.kesYeshalem.sharePercent}%):</span>
                   <span className="font-semibold text-red-600">-{formatCurrency(calculations.kesYeshalem.miscShare)}</span>
                 </div>
+                <div className="flex justify-between border-t border-gray-300 pt-2">
+                  <span className="font-medium">{renderLabel('4. Shared Salary Expense', '4. የጋራ ደሞዝ ወጪ')} ({SHAREHOLDERS.kesYeshalem.sharePercent}% of {formatCurrency(calculations.totalSalaries)}):</span>
+                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.kesYeshalem.salaryShare)}</span>
+                </div>
                 <div className="flex justify-between">
-                  <span>{renderLabel('4. Previous Balance', '4. የቀደመ ሂሳብ')}:</span>
+                  <span>{renderLabel('5. Previous Balance', '5. የቀደመ ሂሳብ')}:</span>
                   <span className={`font-semibold ${calculations.kesYeshalem.prevBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {calculations.kesYeshalem.prevBalance >= 0 ? '+' : ''}{formatCurrency(calculations.kesYeshalem.prevBalance)}
                   </span>
@@ -837,8 +856,12 @@ function App() {
                   <span>{renderLabel('5. Misc Expenses Direct Share', '5. ልዩ ወጪዎች ቀጥታ ድርሻ')} ({SHAREHOLDERS.smeneh.sharePercent}%):</span>
                   <span className="font-semibold text-red-600">-{formatCurrency(calculations.smeneh.miscShare)}</span>
                 </div>
+                <div className="flex justify-between border-t border-gray-300 pt-2">
+                  <span className="font-medium">{renderLabel('6. Shared Salary Expense', '6. የጋራ ደሞዝ ወጪ')} ({SHAREHOLDERS.smeneh.sharePercent}% of {formatCurrency(calculations.totalSalaries)}):</span>
+                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.smeneh.salaryShare)}</span>
+                </div>
                 <div className="flex justify-between">
-                  <span>{renderLabel('6. Previous Balance', '6. የቀደመ ሂሳብ')}:</span>
+                  <span>{renderLabel('7. Previous Balance', '7. የቀደመ ሂሳብ')}:</span>
                   <span className={`font-semibold ${calculations.smeneh.prevBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {calculations.smeneh.prevBalance >= 0 ? '+' : ''}{formatCurrency(calculations.smeneh.prevBalance)}
                   </span>
@@ -878,8 +901,12 @@ function App() {
                   <span>{renderLabel('5. Misc Expenses Direct Share', '5. ልዩ ወጪዎች ቀጥታ ድርሻ')} ({SHAREHOLDERS.amsalu.sharePercent}%):</span>
                   <span className="font-semibold text-red-600">-{formatCurrency(calculations.amsalu.miscShare)}</span>
                 </div>
+                <div className="flex justify-between border-t border-gray-300 pt-2">
+                  <span className="font-medium">{renderLabel('6. Shared Salary Expense', '6. የጋራ ደሞዝ ወጪ')} ({SHAREHOLDERS.amsalu.sharePercent}% of {formatCurrency(calculations.totalSalaries)}):</span>
+                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.amsalu.salaryShare)}</span>
+                </div>
                 <div className="flex justify-between">
-                  <span>{renderLabel('6. Previous Balance', '6. የቀደመ ሂሳብ')}:</span>
+                  <span>{renderLabel('7. Previous Balance', '7. የቀደመ ሂሳብ')}:</span>
                   <span className={`font-semibold ${calculations.amsalu.prevBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {calculations.amsalu.prevBalance >= 0 ? '+' : ''}{formatCurrency(calculations.amsalu.prevBalance)}
                   </span>
@@ -903,7 +930,8 @@ function App() {
                   <p><span className="font-semibold">{renderLabel('Total Gross Income', 'ጠቅላላ ገቢ')}:</span> {formatCurrency(calculations.income)}</p>
                   <p><span className="font-semibold">{renderLabel('Bank Loan Payment', 'የባንክ እዳ ክፍያ')}:</span> {formatCurrency(calculations.bankPayment)}</p>
                   <p><span className="font-semibold">{renderLabel('Misc Expenses', 'ልዩ ወጪዎች')}:</span> {formatCurrency(calculations.miscExpenses)}</p>
-                  <p><span className="font-semibold">{renderLabel('Total Equb Deductions', 'ጠቅላላ እቁብ ቅናሽ')}:</span> {formatCurrency(calculations.actualTotalExpenses)}</p>
+                  <p className="border-t pt-2 mt-2"><span className="font-semibold">{renderLabel('Total Salaries (Shared)', 'ጠቅላላ ደሞዞች (የጋራ)')}:</span> {formatCurrency(calculations.totalSalaries)}</p>
+                  <p><span className="font-semibold">{renderLabel('Total Equb Deductions', 'ጠቅላላ እቁብ ቅናሾች')}:</span> {formatCurrency(calculations.actualTotalExpenses)}</p>
                 </div>
                 <div>
                   <p><span className="font-semibold">{renderLabel('Total Net Payouts', 'ጠቅላላ ንጹህ ክፍያዎች')}:</span> {formatCurrency(calculations.verification.totalNetPayout)}</p>
