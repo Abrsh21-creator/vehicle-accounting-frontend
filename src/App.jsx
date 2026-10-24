@@ -93,25 +93,28 @@ function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [monthlyHistory, setMonthlyHistory] = useState([]);
   
-  // Months data with bilingual labels
+  // Ethiopian Calendar Months (13 months)
   const MONTHS = [
-    { value: 'January', label: 'January', labelAm: 'ጃንዩወሪ' },
-    { value: 'February', label: 'February', labelAm: 'ፌብሩወሪ' },
-    { value: 'March', label: 'March', labelAm: 'ማርች' },
-    { value: 'April', label: 'April', labelAm: 'ኤፕሪል' },
-    { value: 'May', label: 'May', labelAm: 'ሜይ' },
-    { value: 'June', label: 'June', labelAm: 'ጁን' },
-    { value: 'July', label: 'July', labelAm: 'ጁላይ' },
-    { value: 'August', label: 'August', labelAm: 'ኦገስት' },
-    { value: 'September', label: 'September', labelAm: 'ሴፕቴምበር' },
-    { value: 'October', label: 'October', labelAm: 'ኦክቶበር' },
-    { value: 'November', label: 'November', labelAm: 'ኖቬምበር' },
-    { value: 'December', label: 'December', labelAm: 'ዲሴምበር' }
+    { value: 'Meskerem', label: 'Meskerem', labelAm: 'መስከረም', days: 30 },
+    { value: 'Tikimt', label: 'Tikimt', labelAm: 'ጥቅምት', days: 30 },
+    { value: 'Hidar', label: 'Hidar', labelAm: 'ኅዳር', days: 30 },
+    { value: 'Tahsas', label: 'Tahsas', labelAm: 'ታህሳስ', days: 30 },
+    { value: 'Tir', label: 'Tir', labelAm: 'ጥር', days: 30 },
+    { value: 'Yekatit', label: 'Yekatit', labelAm: 'የካቲት', days: 30 },
+    { value: 'Megabit', label: 'Megabit', labelAm: 'መጋቢት', days: 30 },
+    { value: 'Miazia', label: 'Miazia', labelAm: 'ሚያዝያ', days: 30 },
+    { value: 'Ginbot', label: 'Ginbot', labelAm: 'ግንቦት', days: 30 },
+    { value: 'Sene', label: 'Sene', labelAm: 'ሰኔ', days: 30 },
+    { value: 'Hamle', label: 'Hamle', labelAm: 'ሐምሌ', days: 30 },
+    { value: 'Nehase', label: 'Nehase', labelAm: 'ነሐሴ', days: 30 },
+    { value: 'Pagume', label: 'Pagume', labelAm: 'ጳጉሜ', days: 5 }
   ];
   
-  // Generate year options (current year ± 5 years)
-  const currentYear = new Date().getFullYear();
-  const YEARS = Array.from({ length: 11 }, (_, i) => currentYear - 5 + i);
+  // Generate Ethiopian year options (current Ethiopian year is ~2016-2017)
+  // Ethiopian calendar is about 7-8 years behind Gregorian
+  const currentGregorianYear = new Date().getFullYear();
+  const currentEthiopianYear = currentGregorianYear - 7; // Approximate conversion
+  const YEARS = Array.from({ length: 11 }, (_, i) => currentEthiopianYear - 5 + i);
   
   // Computed current month string
   const currentMonth = selectedMonth && selectedYear ? `${selectedMonth} ${selectedYear}` : '';
@@ -127,12 +130,33 @@ function App() {
       }
     }
     
-    // Set current month and year to current date
+    // Set current month and year to Ethiopian calendar equivalent
+    // Ethiopian New Year starts on September 11 (or 12 in leap years)
     const now = new Date();
-    const monthName = now.toLocaleDateString('en-US', { month: 'long' });
-    const yearNum = now.getFullYear();
-    setSelectedMonth(monthName);
-    setSelectedYear(yearNum.toString());
+    const gregorianYear = now.getFullYear();
+    const gregorianMonth = now.getMonth(); // 0-11
+    const gregorianDay = now.getDate();
+    
+    // Simple Ethiopian date approximation
+    // Ethiopian year starts around Sept 11
+    let ethiopianYear;
+    let ethiopianMonthIndex;
+    
+    if (gregorianMonth < 8 || (gregorianMonth === 8 && gregorianDay < 11)) {
+      // Before Sept 11 = still previous Ethiopian year
+      ethiopianYear = gregorianYear - 8;
+      ethiopianMonthIndex = gregorianMonth + 4; // Rough mapping
+    } else {
+      // After Sept 11 = new Ethiopian year
+      ethiopianYear = gregorianYear - 7;
+      ethiopianMonthIndex = gregorianMonth - 8; // Sept=0(Meskerem), Oct=1(Tikimt), etc
+    }
+    
+    // Ensure month index is within bounds
+    ethiopianMonthIndex = Math.max(0, Math.min(12, ethiopianMonthIndex));
+    
+    setSelectedMonth(MONTHS[ethiopianMonthIndex].value);
+    setSelectedYear(ethiopianYear.toString());
   }, []);
 
   // ============================================================================
@@ -271,12 +295,12 @@ function App() {
 
     // Advance to next month
     const currentMonthIndex = MONTHS.findIndex(m => m.value === selectedMonth);
-    if (currentMonthIndex === 11) {
-      // December -> January next year
-      setSelectedMonth('January');
+    if (currentMonthIndex === 12) {
+      // Pagume (13th month) -> Meskerem (1st month) next year
+      setSelectedMonth('Meskerem');
       setSelectedYear((parseInt(selectedYear) + 1).toString());
     } else {
-      // Advance to next month
+      // Advance to next month in Ethiopian calendar
       setSelectedMonth(MONTHS[currentMonthIndex + 1].value);
     }
 
