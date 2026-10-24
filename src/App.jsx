@@ -4,14 +4,16 @@ import { Save, FileText, Calculator, Info, History, Printer, Trash2 } from 'luci
 // ============================================================================
 // MASTER DATA - IMMUTABLE SHAREHOLDER CONSTANTS
 // ============================================================================
+// Display Order: Kes Yeshalem (Main Owner) → Smeneh (Driver) → Amsalu (Assistant)
 const SHAREHOLDERS = {
-  amsalu: {
-    name: 'Amsalu',
-    nameAm: 'አምሳሉ',
-    role: 'Assistant',
-    roleAm: 'እረዳት',
-    sharePercent: 15.6,
-    baseCapital: 920000,
+  kesYeshalem: {
+    name: 'Kes Yeshalem',
+    nameAm: 'ቄስ የሻለም',
+    role: 'Main Owner',
+    roleAm: 'ባለቤት',
+    sharePercent: 71.8,
+    baseCapital: 4218359,
+    order: 1,
   },
   smeneh: {
     name: 'Smeneh',
@@ -20,16 +22,21 @@ const SHAREHOLDERS = {
     roleAm: 'ሾፌር',
     sharePercent: 12.6,
     baseCapital: 741800,
+    order: 2,
   },
-  kesYeshalem: {
-    name: 'Kes Yeshalem',
-    nameAm: 'ቄስ የሻለም',
-    role: 'Main Owner',
-    roleAm: 'ባለቤት',
-    sharePercent: 71.8,
-    baseCapital: 4218359,
+  amsalu: {
+    name: 'Amsalu',
+    nameAm: 'አምሳሉ',
+    role: 'Assistant',
+    roleAm: 'እረዳት',
+    sharePercent: 15.6,
+    baseCapital: 920000,
+    order: 3,
   },
 };
+
+// Ordered shareholder keys for consistent display
+const SHAREHOLDER_ORDER = ['kesYeshalem', 'smeneh', 'amsalu'];
 
 const TOTAL_CAPITAL = 5880159;
 
@@ -390,14 +397,17 @@ function App() {
 
           {/* Shareholder Summary */}
           <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-            {Object.entries(SHAREHOLDERS).map(([key, sh]) => (
+            {SHAREHOLDER_ORDER.map((key) => {
+              const sh = SHAREHOLDERS[key];
+              return (
               <div key={key} className="bg-gradient-to-r from-indigo-50 to-blue-50 p-4 rounded-lg border border-indigo-200">
                 <h3 className="font-bold text-gray-800">{renderLabel(sh.name, sh.nameAm)}</h3>
                 <p className="text-sm text-gray-600">{renderLabel(sh.role, sh.roleAm)}</p>
                 <p className="text-lg font-semibold text-indigo-700 mt-2">{sh.sharePercent}%</p>
                 <p className="text-xs text-gray-500">{renderLabel('Base Capital', 'መሠረታዊ ካፒታል')}: {formatCurrency(sh.baseCapital)}</p>
               </div>
-            ))}
+            );
+            })}
           </div>
         </div>
 
@@ -556,37 +566,11 @@ function App() {
               </div>
             </div>
 
-            {/* Amsalu Section */}
+            {/* Kes Yeshalem Section */}
             <div className="space-y-4">
               <h3 className="font-semibold text-gray-700 border-b pb-2">
-                {renderLabel(`${SHAREHOLDERS.amsalu.name} (${SHAREHOLDERS.amsalu.role})`, `${SHAREHOLDERS.amsalu.nameAm} (${SHAREHOLDERS.amsalu.roleAm})`)}
+                {renderLabel(`${SHAREHOLDERS.kesYeshalem.name} (${SHAREHOLDERS.kesYeshalem.role})`, `${SHAREHOLDERS.kesYeshalem.nameAm} (${SHAREHOLDERS.kesYeshalem.roleAm})`)}
               </h3>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {renderLabel('Monthly Salary', 'የወር ደሞዝ')}
-                </label>
-                <input
-                  type="number"
-                  value={amsaluSalary}
-                  onChange={(e) => setAmsaluSalary(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  placeholder="0.00"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {renderLabel('Monthly Equb', 'የወር እቁብ')}
-                </label>
-                <input
-                  type="number"
-                  value={amsaluEqub}
-                  onChange={(e) => setAmsaluEqub(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  placeholder="0.00"
-                />
-              </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -594,8 +578,8 @@ function App() {
                 </label>
                 <input
                   type="number"
-                  value={amsaluPrevBalance}
-                  onChange={(e) => setAmsaluPrevBalance(e.target.value)}
+                  value={kesYeshalemPrevBalance}
+                  onChange={(e) => setKesYeshalemPrevBalance(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
                 />
@@ -648,11 +632,37 @@ function App() {
               </div>
             </div>
 
-            {/* Kes Yeshalem Previous Balance */}
+            {/* Amsalu Section */}
             <div className="space-y-4">
               <h3 className="font-semibold text-gray-700 border-b pb-2">
-                {renderLabel(`${SHAREHOLDERS.kesYeshalem.name} (${SHAREHOLDERS.kesYeshalem.role})`, `${SHAREHOLDERS.kesYeshalem.nameAm} (${SHAREHOLDERS.kesYeshalem.roleAm})`)}
+                {renderLabel(`${SHAREHOLDERS.amsalu.name} (${SHAREHOLDERS.amsalu.role})`, `${SHAREHOLDERS.amsalu.nameAm} (${SHAREHOLDERS.amsalu.roleAm})`)}
               </h3>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {renderLabel('Monthly Salary', 'የወር ደሞዝ')}
+                </label>
+                <input
+                  type="number"
+                  value={amsaluSalary}
+                  onChange={(e) => setAmsaluSalary(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {renderLabel('Monthly Equb', 'የወር እቁብ')}
+                </label>
+                <input
+                  type="number"
+                  value={amsaluEqub}
+                  onChange={(e) => setAmsaluEqub(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="0.00"
+                />
+              </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -660,8 +670,8 @@ function App() {
                 </label>
                 <input
                   type="number"
-                  value={kesYeshalemPrevBalance}
-                  onChange={(e) => setKesYeshalemPrevBalance(e.target.value)}
+                  value={amsaluPrevBalance}
+                  onChange={(e) => setAmsaluPrevBalance(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
                 />
@@ -689,18 +699,18 @@ function App() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Amsalu Result */}
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-lg border-2 border-indigo-200">
+            {/* Kes Yeshalem Result */}
+            <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-6 rounded-lg border-2 border-green-200">
               <h3 className="text-xl font-bold text-gray-800 mb-2">
-                {renderLabel(SHAREHOLDERS.amsalu.name, SHAREHOLDERS.amsalu.nameAm)}
+                {renderLabel(SHAREHOLDERS.kesYeshalem.name, SHAREHOLDERS.kesYeshalem.nameAm)}
               </h3>
               <p className="text-sm text-gray-600 mb-4">
-                {SHAREHOLDERS.amsalu.sharePercent}% {renderLabel('Share', 'ድርሻ')}
+                {SHAREHOLDERS.kesYeshalem.sharePercent}% {renderLabel('Share', 'ድርሻ')}
               </p>
-              <div className={`text-3xl font-bold ${calculations.amsalu.netPayout < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                {formatCurrency(calculations.amsalu.netPayout)}
+              <div className={`text-3xl font-bold ${calculations.kesYeshalem.netPayout < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                {formatCurrency(calculations.kesYeshalem.netPayout)}
               </div>
-              {calculations.amsalu.netPayout < 0 && (
+              {calculations.kesYeshalem.netPayout < 0 && (
                 <p className="text-red-600 text-sm mt-2">{renderLabel('(Debt/Loss)', '(እዳ/ኪሳራ)')}</p>
               )}
             </div>
@@ -721,18 +731,18 @@ function App() {
               )}
             </div>
 
-            {/* Kes Yeshalem Result */}
-            <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-6 rounded-lg border-2 border-green-200">
+            {/* Amsalu Result */}
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-lg border-2 border-indigo-200">
               <h3 className="text-xl font-bold text-gray-800 mb-2">
-                {renderLabel(SHAREHOLDERS.kesYeshalem.name, SHAREHOLDERS.kesYeshalem.nameAm)}
+                {renderLabel(SHAREHOLDERS.amsalu.name, SHAREHOLDERS.amsalu.nameAm)}
               </h3>
               <p className="text-sm text-gray-600 mb-4">
-                {SHAREHOLDERS.kesYeshalem.sharePercent}% {renderLabel('Share', 'ድርሻ')}
+                {SHAREHOLDERS.amsalu.sharePercent}% {renderLabel('Share', 'ድርሻ')}
               </p>
-              <div className={`text-3xl font-bold ${calculations.kesYeshalem.netPayout < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                {formatCurrency(calculations.kesYeshalem.netPayout)}
+              <div className={`text-3xl font-bold ${calculations.amsalu.netPayout < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                {formatCurrency(calculations.amsalu.netPayout)}
               </div>
-              {calculations.kesYeshalem.netPayout < 0 && (
+              {calculations.amsalu.netPayout < 0 && (
                 <p className="text-red-600 text-sm mt-2">{renderLabel('(Debt/Loss)', '(እዳ/ኪሳራ)')}</p>
               )}
             </div>
