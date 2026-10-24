@@ -844,8 +844,8 @@ function App() {
                   <span>{renderLabel('2. Salary Received', '2. የተቀበለው ደሞዝ')}:</span>
                   <span className="font-semibold text-green-600">+{formatCurrency(calculations.smeneh.salary)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('3. Equb Deduction', '3. እቁብ ቅናሽ')}:</span>
+                <div className="flex justify-between bg-yellow-50 p-2 rounded">
+                  <span className="font-medium">{renderLabel('3. Personal Equb Deduction (Not Shared)', '3. የግል እቁብ ቅናሽ (ያልተጋራ)')}</span>
                   <span className="font-semibold text-red-600">-{formatCurrency(calculations.smeneh.equb)}</span>
                 </div>
                 <div className="flex justify-between">
@@ -889,8 +889,8 @@ function App() {
                   <span>{renderLabel('2. Salary Received', '2. የተቀበለው ደሞዝ')}:</span>
                   <span className="font-semibold text-green-600">+{formatCurrency(calculations.amsalu.salary)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('3. Equb Deduction', '3. እቁብ ቅናሽ')}:</span>
+                <div className="flex justify-between bg-yellow-50 p-2 rounded">
+                  <span className="font-medium">{renderLabel('3. Personal Equb Deduction (Not Shared)', '3. የግል እቁብ ቅናሽ (ያልተጋራ)')}</span>
                   <span className="font-semibold text-red-600">-{formatCurrency(calculations.amsalu.equb)}</span>
                 </div>
                 <div className="flex justify-between">
@@ -925,13 +925,25 @@ function App() {
               <h3 className="text-xl font-bold text-gray-800 mb-4">
                 {renderLabel('Summary & Verification', 'ማጠቃለያ እና ማረጋገጫ')}
               </h3>
+              
+              {/* Expense Classification Info */}
+              <div className="mb-4 p-3 bg-blue-50 border-l-4 border-blue-500 text-sm">
+                <p className="font-semibold mb-2">{renderLabel('Expense Types', 'የወጪ ዓይነቶች')}:</p>
+                <p className="text-gray-700">
+                  <span className="font-medium">{renderLabel('Shared (% based)', 'የጋራ (በ% የሚሰላ)')}:</span> {renderLabel('Bank, Misc, Salaries', 'ባንክ፣ ልዩ ወጪ፣ ደሞዞች')}
+                </p>
+                <p className="text-gray-700">
+                  <span className="font-medium">{renderLabel('Personal (Direct)', 'የግል (ቀጥታ)')}:</span> {renderLabel('Equb - Never shared', 'እቁብ - በጭራሽ አይጋራም')}
+                </p>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                 <div>
                   <p><span className="font-semibold">{renderLabel('Total Gross Income', 'ጠቅላላ ገቢ')}:</span> {formatCurrency(calculations.income)}</p>
                   <p><span className="font-semibold">{renderLabel('Bank Loan Payment', 'የባንክ እዳ ክፍያ')}:</span> {formatCurrency(calculations.bankPayment)}</p>
                   <p><span className="font-semibold">{renderLabel('Misc Expenses', 'ልዩ ወጪዎች')}:</span> {formatCurrency(calculations.miscExpenses)}</p>
                   <p className="border-t pt-2 mt-2"><span className="font-semibold">{renderLabel('Total Salaries (Shared)', 'ጠቅላላ ደሞዞች (የጋራ)')}:</span> {formatCurrency(calculations.totalSalaries)}</p>
-                  <p><span className="font-semibold">{renderLabel('Total Equb Deductions', 'ጠቅላላ እቁብ ቅናሾች')}:</span> {formatCurrency(calculations.actualTotalExpenses)}</p>
+                  <p className="bg-yellow-50 p-2 rounded"><span className="font-semibold">{renderLabel('Total Equb (Personal Only)', 'ጠቅላላ እቁብ (የግል ብቻ)')}:</span> {formatCurrency(calculations.actualTotalExpenses)}</p>
                 </div>
                 <div>
                   <p><span className="font-semibold">{renderLabel('Total Net Payouts', 'ጠቅላላ ንጹህ ክፍያዎች')}:</span> {formatCurrency(calculations.verification.totalNetPayout)}</p>
