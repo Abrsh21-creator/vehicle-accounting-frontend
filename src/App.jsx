@@ -68,6 +68,10 @@ function App() {
   // Language toggle state
   const [language, setLanguage] = useState('both'); // 'english', 'amharic', 'both'
 
+  // Month and Year Selection States
+  const [selectedMonth, setSelectedMonth] = useState('');
+  const [selectedYear, setSelectedYear] = useState('');
+  
   // Monthly Input States
   const [grossIncome, setGrossIncome] = useState('');
   const [bankInstallment, setBankInstallment] = useState('');
@@ -88,7 +92,29 @@ function App() {
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [monthlyHistory, setMonthlyHistory] = useState([]);
-  const [currentMonth, setCurrentMonth] = useState('');
+  
+  // Months data with bilingual labels
+  const MONTHS = [
+    { value: 'January', label: 'January', labelAm: 'ጃንዩወሪ' },
+    { value: 'February', label: 'February', labelAm: 'ፌብሩወሪ' },
+    { value: 'March', label: 'March', labelAm: 'ማርች' },
+    { value: 'April', label: 'April', labelAm: 'ኤፕሪል' },
+    { value: 'May', label: 'May', labelAm: 'ሜይ' },
+    { value: 'June', label: 'June', labelAm: 'ጁን' },
+    { value: 'July', label: 'July', labelAm: 'ጁላይ' },
+    { value: 'August', label: 'August', labelAm: 'ኦገስት' },
+    { value: 'September', label: 'September', labelAm: 'ሴፕቴምበር' },
+    { value: 'October', label: 'October', labelAm: 'ኦክቶበር' },
+    { value: 'November', label: 'November', labelAm: 'ኖቬምበር' },
+    { value: 'December', label: 'December', labelAm: 'ዲሴምበር' }
+  ];
+  
+  // Generate year options (current year ± 5 years)
+  const currentYear = new Date().getFullYear();
+  const YEARS = Array.from({ length: 11 }, (_, i) => currentYear - 5 + i);
+  
+  // Computed current month string
+  const currentMonth = selectedMonth && selectedYear ? `${selectedMonth} ${selectedYear}` : '';
 
   // Load history from localStorage on mount
   useEffect(() => {
@@ -101,10 +127,12 @@ function App() {
       }
     }
     
-    // Set current month to current date
+    // Set current month and year to current date
     const now = new Date();
-    const monthStr = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
-    setCurrentMonth(monthStr);
+    const monthName = now.toLocaleDateString('en-US', { month: 'long' });
+    const yearNum = now.getFullYear();
+    setSelectedMonth(monthName);
+    setSelectedYear(yearNum.toString());
   }, []);
 
   // ============================================================================
@@ -200,8 +228,8 @@ function App() {
    * Save current month's calculations and carry forward net balances
    */
   const handleSaveMonth = () => {
-    if (!currentMonth.trim()) {
-      alert('Please enter a month name (e.g., January 2024)');
+    if (!selectedMonth || !selectedYear) {
+      alert('Please select both month and year');
       return;
     }
 
@@ -242,9 +270,15 @@ function App() {
     setSmenehEqub('');
 
     // Advance to next month
-    const now = new Date();
-    now.setMonth(now.getMonth() + 1);
-    setCurrentMonth(now.toLocaleDateString('en-US', { year: 'numeric', month: 'long' }));
+    const currentMonthIndex = MONTHS.findIndex(m => m.value === selectedMonth);
+    if (currentMonthIndex === 11) {
+      // December -> January next year
+      setSelectedMonth('January');
+      setSelectedYear((parseInt(selectedYear) + 1).toString());
+    } else {
+      // Advance to next month
+      setSelectedMonth(MONTHS[currentMonthIndex + 1].value);
+    }
 
     alert('Month saved successfully! Balances carried forward to next month.');
   };
@@ -403,18 +437,52 @@ function App() {
             </h2>
           </div>
 
-          {/* Current Month Input */}
+          {/* Current Month and Year Selection */}
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              {renderLabel('Current Month', 'የአሁኑ ወር')}
+              {renderLabel('Select Month & Year', 'ወር እና ዓመት ይምረጡ')}
             </label>
-            <input
-              type="text"
-              value={currentMonth}
-              onChange={(e) => setCurrentMonth(e.target.value)}
-              className="w-full md:w-1/2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              placeholder="e.g., January 2024"
-            />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
+              {/* Month Dropdown */}
+              <div>
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white text-gray-900 font-medium shadow-sm hover:border-indigo-400 transition-colors"
+                >
+                  <option value="">{renderLabel('-- Select Month --', '-- ወር ይምረጡ --')}</option>
+                  {MONTHS.map((month) => (
+                    <option key={month.value} value={month.value}>
+                      {language === 'amharic' ? month.labelAm : language === 'both' ? `${month.labelAm} / ${month.label}` : month.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Year Dropdown */}
+              <div>
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white text-gray-900 font-medium shadow-sm hover:border-indigo-400 transition-colors"
+                >
+                  <option value="">{renderLabel('-- Select Year --', '-- ዓመት ይምረጡ --')}</option>
+                  {YEARS.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            
+            {/* Display Selected Month & Year */}
+            {currentMonth && (
+              <div className="mt-3 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-lg inline-block">
+                <span className="text-sm text-gray-600 mr-2">{renderLabel('Selected:', 'የተመረጠው:')}</span>
+                <span className="font-bold text-indigo-700">{currentMonth}</span>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
