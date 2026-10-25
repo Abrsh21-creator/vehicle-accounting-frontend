@@ -54,7 +54,7 @@ export const PERMISSIONS = {
 
 // Mock users (In production, this would come from your backend/database)
 const USERS = [
-  { username: 'admin', password: 'admin123', role: ROLES.ADMIN, name: 'Administrator' },
+  { username: 'Abrham', password: 'Abrham123', role: ROLES.ADMIN, name: 'Administrator' },
   { username: 'kesyeshalem', password: 'kes123', role: ROLES.KES_YESHALEM, name: 'Kes Yeshalem' },
   { username: 'smeneh', password: 'smeneh123', role: ROLES.SMENEH, name: 'Smeneh' },
   { username: 'amsalu', password: 'amsalu123', role: ROLES.AMSALU, name: 'Amsalu' },
