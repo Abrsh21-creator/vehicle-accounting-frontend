@@ -150,6 +150,8 @@ function App() {
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [monthlyHistory, setMonthlyHistory] = useState([]);
+  const [showAnnualReport, setShowAnnualReport] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
   
   // Modal States for Security Features
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, index: null, monthName: '' });
@@ -612,6 +614,115 @@ function App() {
   };
 
   /**
+   * Calculate Annual Report Summary from monthly history
+   */
+  const calculateAnnualReport = () => {
+    if (monthlyHistory.length === 0) return null;
+
+    const summary = {
+      totalMonths: monthlyHistory.length,
+      totalGrossIncome: 0,
+      totalOvertimeIncome: 0,
+      totalBankInstallment: 0,
+      totalMiscExpenses: 0,
+      totalInsurance: 0,
+      totalKesOutOfPocket: 0,
+      totalSalaries: 0,
+      kesYeshalemTotalNet: 0,
+      smenehTotalNet: 0,
+      amsaluTotalNet: 0,
+      months: [],
+    };
+
+    monthlyHistory.forEach(record => {
+      summary.totalGrossIncome += record.inputs.grossIncome || 0;
+      summary.totalOvertimeIncome += record.inputs.overtimeIncome || 0;
+      summary.totalBankInstallment += record.inputs.bankInstallment || 0;
+      summary.totalMiscExpenses += record.inputs.miscExpenses || 0;
+      summary.totalInsurance += record.inputs.insurancePayment || 0;
+      summary.totalKesOutOfPocket += record.inputs.kesOutOfPocket || 0;
+      summary.totalSalaries += (record.inputs.amsaluSalary || 0) + (record.inputs.smenehSalary || 0);
+      summary.kesYeshalemTotalNet += record.results.kesYeshalem.netPayout || 0;
+      summary.smenehTotalNet += record.results.smeneh.netPayout || 0;
+      summary.amsaluTotalNet += record.results.amsalu.netPayout || 0;
+      summary.months.push(record.month);
+    });
+
+    summary.totalExpenses = summary.totalBankInstallment + summary.totalMiscExpenses + summary.totalInsurance + summary.totalKesOutOfPocket;
+    summary.totalNetPayouts = summary.kesYeshalemTotalNet + summary.smenehTotalNet + summary.amsaluTotalNet;
+
+    return summary;
+  };
+
+  /**
+   * Handle Start New Period / Reset (Admin only)
+   */
+  const handleStartNewPeriod = () => {
+    if (!window.confirm(renderLabel(
+      'Are you sure you want to start a new period? This will reset all current inputs and balances. Historical data will be preserved in archive.',
+      'አዲስ ጊዜ መጀመር ይፈልጋሉ? ይህ ሁሉንም የአሁኑን ግብዓቶች እና ሚዛኖች ያስቀምጣል። የታሪክ መረጃ በማህደር ውስጥ ይቀመጣል።'
+    ))) return;
+
+    const reason = prompt(renderLabel('Enter reason for starting new period:', 'አዲስ ጊዜ ለመጀመር ምክንያት ያስገቡ:'));
+    if (!reason) return;
+
+    // Archive current cycle
+    const archiveEntry = {
+      archivedAt: new Date().toISOString(),
+      archivedBy: user.username,
+      reason,
+      cycleData: {
+        monthlyHistory: [...monthlyHistory],
+        recycleBin: [...recycleBin],
+        totalMonths: monthlyHistory.length,
+      },
+    };
+
+    // Get existing archives
+    const existingArchives = JSON.parse(localStorage.getItem('cycleArchives') || '[]');
+    existingArchives.push(archiveEntry);
+    localStorage.setItem('cycleArchives', JSON.stringify(existingArchives));
+
+    // Reset all input states
+    setGrossIncome('');
+    setOvertimeIncome('');
+    setBankInstallment('');
+    setMiscExpenses('');
+    setInsurancePayment('');
+    setKesOutOfPocket('');
+    setAmsaluSalary('');
+    setAmsaluEqub('');
+    setSmenehSalary('');
+    setSmenehEqub('');
+    setAmsaluPrevBalance('');
+    setSmenehPrevBalance('');
+    setKesYeshalemPrevBalance('');
+
+    // Clear active history
+    setMonthlyHistory([]);
+    localStorage.setItem('vehicleAccountingHistory', JSON.stringify([]));
+
+    // Keep recycle bin but mark it as archived
+    setRecycleBin([]);
+    localStorage.setItem('recycleBin', JSON.stringify([]));
+
+    // Log the reset action
+    const log = createAuditLog(
+      AUDIT_ACTIONS.EDIT_MONTH, // Using EDIT_MONTH as closest action type
+      { action: 'start_new_period', reason, archivedMonths: monthlyHistory.length },
+      user
+    );
+    saveAuditLog(log);
+
+    alert(renderLabel(
+      `New period started successfully! ${monthlyHistory.length} months archived.`,
+      `አዲስ ጊዜ በተሳካ ሁኔታ ተጀመረ! ${monthlyHistory.length} ወራት ተመዝግበዋል።`
+    ));
+
+    setShowResetModal(false);
+  };
+
+  /**
    * Delete a specific month from history (DEPRECATED - Use soft delete instead)
    */
   const handleDeleteMonthOld = (index) => {
@@ -995,6 +1106,13 @@ function App() {
                   <History size={18} />
                   {renderLabel('History', 'ታሪክ')}
                 </button>
+                <button
+                  onClick={() => setShowAnnualReport(!showAnnualReport)}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+                >
+                  <FileText size={18} />
+                  {renderLabel('Annual Report', 'የዓመት ሪፖርት')}
+                </button>
                 {hasPermission('canDelete') && recycleBin.length > 0 && (
                   <button
                     onClick={() => setShowRecycleBin(!showRecycleBin)}
@@ -1014,6 +1132,15 @@ function App() {
                   <Printer size={18} />
                   {renderLabel('Print', 'አትም')}
                 </button>
+                {isAdmin && (
+                  <button
+                    onClick={() => setShowResetModal(true)}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2"
+                  >
+                    <RotateCcw size={18} />
+                    {renderLabel('New Period', 'አዲስ ጊዜ')}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1704,6 +1831,207 @@ function App() {
             )}
           </p>
         </div>
+        )}
+
+        {/* Annual Report Section */}
+        {showAnnualReport && monthlyHistory.length > 0 && (
+          <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg shadow-lg p-6 mb-6 border-2 border-purple-200">
+            <div className="flex justify-between items-center mb-6">
+              <div className="flex items-center gap-2">
+                <FileText className="text-purple-600" size={28} />
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-800">
+                    {renderLabel('Annual Report Summary', 'የዓመት ሪፖርት ማጠቃለያ')}
+                  </h2>
+                  <p className="text-sm text-gray-600">
+                    {renderLabel(`Based on ${monthlyHistory.length} months of data`, `በ ${monthlyHistory.length} ወራት መረጃ ላይ የተመሰረተ`)}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAnnualReport(false)}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+              >
+                {renderLabel('Close', 'ዝጋ')}
+              </button>
+            </div>
+
+            {(() => {
+              const annualData = calculateAnnualReport();
+              if (!annualData) return null;
+
+              return (
+                <div className="space-y-6">
+                  {/* Income Summary */}
+                  <div className="bg-white rounded-lg p-6 border border-purple-200">
+                    <h3 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">
+                      {renderLabel('Income Summary', 'የገቢ ማጠቃለያ')}
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <p className="text-sm text-gray-600">{renderLabel('Total Gross Income', 'ጠቅላላ ገቢ')}</p>
+                        <p className="text-2xl font-bold text-green-600">{formatCurrency(annualData.totalGrossIncome)}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-600">{renderLabel('Total Overtime Income', 'ጠቅላላ ኦቨርታይም')}</p>
+                        <p className="text-2xl font-bold text-green-600">{formatCurrency(annualData.totalOvertimeIncome)}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-600">{renderLabel('Total Income', 'ጠቅላላ ገቢ')}</p>
+                        <p className="text-3xl font-bold text-green-700">{formatCurrency(annualData.totalGrossIncome + annualData.totalOvertimeIncome)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Expenses Summary */}
+                  <div className="bg-white rounded-lg p-6 border border-purple-200">
+                    <h3 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">
+                      {renderLabel('Expenses Summary', 'የወጪ ማጠቃለያ')}
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      <div>
+                        <p className="text-sm text-gray-600">{renderLabel('Bank Loans', 'የባንክ እዳ')}</p>
+                        <p className="text-xl font-bold text-red-600">{formatCurrency(annualData.totalBankInstallment)}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-600">{renderLabel('Misc Expenses', 'ልዩ ወጪዎች')}</p>
+                        <p className="text-xl font-bold text-red-600">{formatCurrency(annualData.totalMiscExpenses)}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-600">{renderLabel('Insurance', 'ኢንሹራንስ')}</p>
+                        <p className="text-xl font-bold text-red-600">{formatCurrency(annualData.totalInsurance)}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-600">{renderLabel('Out-of-Pocket', 'ከኪስ ወጪ')}</p>
+                        <p className="text-xl font-bold text-red-600">{formatCurrency(annualData.totalKesOutOfPocket)}</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 pt-4 border-t">
+                      <div className="flex justify-between items-center">
+                        <p className="text-lg font-semibold text-gray-700">{renderLabel('Total Expenses', 'ጠቅላላ ወጪዎች')}</p>
+                        <p className="text-3xl font-bold text-red-700">{formatCurrency(annualData.totalExpenses)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Shareholder Net Payouts */}
+                  <div className="bg-white rounded-lg p-6 border border-purple-200">
+                    <h3 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">
+                      {renderLabel('Annual Net Payouts by Shareholder', 'የባለአክሲዮኖች ዓመታዊ ንጹህ ክፍያዎች')}
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-6 rounded-lg border-2 border-green-200">
+                        <h4 className="font-bold text-gray-800 mb-2">{renderLabel(SHAREHOLDERS.kesYeshalem.name, SHAREHOLDERS.kesYeshalem.nameAm)}</h4>
+                        <p className="text-sm text-gray-600 mb-3">{SHAREHOLDERS.kesYeshalem.sharePercent}% {renderLabel('Share', 'ድርሻ')}</p>
+                        <p className="text-3xl font-bold text-green-600">{formatCurrency(annualData.kesYeshalemTotalNet)}</p>
+                      </div>
+                      <div className="bg-gradient-to-br from-purple-50 to-pink-50 p-6 rounded-lg border-2 border-purple-200">
+                        <h4 className="font-bold text-gray-800 mb-2">{renderLabel(SHAREHOLDERS.smeneh.name, SHAREHOLDERS.smeneh.nameAm)}</h4>
+                        <p className="text-sm text-gray-600 mb-3">{SHAREHOLDERS.smeneh.sharePercent}% {renderLabel('Share', 'ድርሻ')}</p>
+                        <p className="text-3xl font-bold text-purple-600">{formatCurrency(annualData.smenehTotalNet)}</p>
+                      </div>
+                      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-lg border-2 border-blue-200">
+                        <h4 className="font-bold text-gray-800 mb-2">{renderLabel(SHAREHOLDERS.amsalu.name, SHAREHOLDERS.amsalu.nameAm)}</h4>
+                        <p className="text-sm text-gray-600 mb-3">{SHAREHOLDERS.amsalu.sharePercent}% {renderLabel('Share', 'ድርሻ')}</p>
+                        <p className="text-3xl font-bold text-blue-600">{formatCurrency(annualData.amsaluTotalNet)}</p>
+                      </div>
+                    </div>
+                    <div className="mt-6 pt-4 border-t">
+                      <div className="flex justify-between items-center">
+                        <p className="text-lg font-semibold text-gray-700">{renderLabel('Total Net Payouts', 'ጠቅላላ ንጹህ ክፍያዎች')}</p>
+                        <p className="text-4xl font-bold text-indigo-700">{formatCurrency(annualData.totalNetPayouts)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Salaries Summary */}
+                  <div className="bg-white rounded-lg p-6 border border-purple-200">
+                    <h3 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">
+                      {renderLabel('Salaries Paid', 'የተከፈሉ ደሞዞች')}
+                    </h3>
+                    <div className="flex justify-between items-center">
+                      <p className="text-lg text-gray-700">{renderLabel('Total Salaries', 'ጠቅላላ ደሞዞች')}</p>
+                      <p className="text-3xl font-bold text-indigo-600">{formatCurrency(annualData.totalSalaries)}</p>
+                    </div>
+                  </div>
+
+                  {/* Months Covered */}
+                  <div className="bg-white rounded-lg p-6 border border-purple-200">
+                    <h3 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">
+                      {renderLabel('Months Covered', 'የተሸፈኑ ወራት')}
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {annualData.months.map((month, idx) => (
+                        <span key={idx} className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-semibold">
+                          {month}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="mt-4 text-gray-600">
+                      {renderLabel(`Total: ${annualData.totalMonths} months`, `ጠቅላላ: ${annualData.totalMonths} ወራት`)}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Reset/New Period Modal */}
+        {showResetModal && isAdmin && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-2xl max-w-2xl w-full p-8">
+              <div className="flex items-center gap-3 mb-6">
+                <AlertTriangle className="text-red-600" size={32} />
+                <h2 className="text-2xl font-bold text-gray-800">
+                  {renderLabel('Start New Period', 'አዲስ ጊዜ ጀምር')}
+                </h2>
+              </div>
+              
+              <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-gray-800 font-semibold mb-2">
+                  {renderLabel('⚠️ Warning: This action will:', '⚠️ ማስጠንቀቂያ: ይህ ድርጊት:')}
+                </p>
+                <ul className="list-disc list-inside text-gray-700 space-y-2 ml-4">
+                  <li>{renderLabel('Archive all current monthly records', 'ሁሉንም የአሁኑን የወር መዝገቦች ያህዳል')}</li>
+                  <li>{renderLabel('Reset all input fields to empty', 'ሁሉንም የግብዓት መስኮች ባዶ ያደርጋል')}</li>
+                  <li>{renderLabel('Clear current balances', 'የአሁኑን ሂሳቦች ያጸዳል')}</li>
+                  <li>{renderLabel('Preserve historical data in archive', 'የታሪክ መረጃን በማህደር ውስጥ ይጠብቃል')}</li>
+                </ul>
+              </div>
+
+              <div className="mb-6">
+                <p className="text-gray-700">
+                  {renderLabel(
+                    `You have ${monthlyHistory.length} months of data that will be archived.`,
+                    `${monthlyHistory.length} ወራት መረጃ አሉ የሚያህዱ።`
+                  )}
+                </p>
+                <p className="text-sm text-gray-600 mt-2">
+                  {renderLabel(
+                    'This is useful when starting a new year or accounting cycle.',
+                    'ይህ አዲስ ዓመት ወይም የሂሳብ ዑደት በሚጀምሩበት ጊዜ ጠቃሚ ነው።'
+                  )}
+                </p>
+              </div>
+
+              <div className="flex gap-4">
+                <button
+                  onClick={handleStartNewPeriod}
+                  className="flex-1 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-semibold flex items-center justify-center gap-2"
+                >
+                  <RotateCcw size={20} />
+                  {renderLabel('Confirm - Start New Period', 'አረጋግጥ - አዲስ ጊዜ ጀምር')}
+                </button>
+                <button
+                  onClick={() => setShowResetModal(false)}
+                  className="flex-1 px-6 py-3 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition-colors font-semibold"
+                >
+                  {renderLabel('Cancel', 'ይቅር')}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Monthly History Archive Table (የወርሃዊ ታሪክ ማህደር) */}
