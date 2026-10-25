@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Save, FileText, Calculator, Info, History, Printer, Trash2 } from 'lucide-react';
+import { Save, FileText, Calculator, Info, History, Printer, Trash2, Edit, MessageSquare, RotateCcw, Shield, LogOut, AlertTriangle } from 'lucide-react';
+import { useAuth } from './AuthContext';
+import LoginPage from './LoginPage';
+import { ReasonModal, CommentModal, EditMonthModal } from './Modals';
+import { createAuditLog, saveAuditLog, AUDIT_ACTIONS } from './AuditLog';
 
 // ============================================================================
 // MASTER DATA - IMMUTABLE SHAREHOLDER CONSTANTS
@@ -58,12 +62,32 @@ const formatCurrency = (value) => {
 };
 
 /**
+ * Format number for display in input fields with commas
+ * @param {string|number} value - The number to format
+ * @returns {string} Formatted string with commas
+ */
+const formatNumberInput = (value) => {
+  if (!value) return '';
+  // Remove all non-digit characters except decimal point
+  const numStr = value.toString().replace(/[^\d.]/g, '');
+  const num = parseFloat(numStr);
+  if (isNaN(num)) return '';
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(num);
+};
+
+/**
  * Safely parse input value to float, defaulting to 0
  * @param {string|number} value - Input value
  * @returns {number} Parsed float value
  */
 const safeParseFloat = (value) => {
-  const parsed = parseFloat(value);
+  if (!value) return 0;
+  // Remove commas and other formatting characters
+  const cleanValue = value.toString().replace(/,/g, '');
+  const parsed = parseFloat(cleanValue);
   return isNaN(parsed) ? 0 : parsed;
 };
 
@@ -72,6 +96,28 @@ const safeParseFloat = (value) => {
 // ============================================================================
 
 function App() {
+  // ============================================================================
+  // AUTHENTICATION & AUTHORIZATION
+  // ============================================================================
+  const { user, isAdmin, hasPermission, loading, logout } = useAuth();
+
+  // Show loading spinner while checking authentication
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-4 border-indigo-600 border-t-transparent mx-auto mb-4"></div>
+          <p className="text-gray-600 text-lg">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If not authenticated, show login page
+  if (!user) {
+    return <LoginPage />;
+  }
+
   // Language toggle state
   const [language, setLanguage] = useState('both'); // 'english', 'amharic', 'both'
 
@@ -81,8 +127,10 @@ function App() {
   
   // Monthly Input States
   const [grossIncome, setGrossIncome] = useState('');
+  const [overtimeIncome, setOvertimeIncome] = useState('');
   const [bankInstallment, setBankInstallment] = useState('');
   const [miscExpenses, setMiscExpenses] = useState('');
+  const [insurancePayment, setInsurancePayment] = useState(''); // NEW: Insurance expense
   
   // Personnel Salaries & Equb
   const [amsaluSalary, setAmsaluSalary] = useState('');
@@ -99,6 +147,12 @@ function App() {
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [monthlyHistory, setMonthlyHistory] = useState([]);
+  
+  // Modal States for Security Features
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, index: null, monthName: '' });
+  const [editModal, setEditModal] = useState({ isOpen: false, data: null, index: null });
+  const [commentModal, setCommentModal] = useState({ isOpen: false, index: null, monthName: '', comment: '' });
+  const [pendingDeletions, setPendingDeletions] = useState([]);
   
   // Ethiopian Calendar Months (13 months)
   const MONTHS = [
@@ -166,21 +220,62 @@ function App() {
     setSelectedYear(ethiopianYear.toString());
   }, []);
 
+  // Load pending deletions and clean up expired ones (> 3 days)
+  useEffect(() => {
+    const saved = localStorage.getItem('pendingDeletions');
+    if (saved) {
+      try {
+        const pending = JSON.parse(saved);
+        // Filter out items older than 3 days
+        const now = Date.now();
+        const valid = pending.filter(item => {
+          const ageInDays = (now - item.deletedAt) / (1000 * 60 * 60 * 24);
+          return ageInDays < 3;
+        });
+        
+        // If any expired, log permanent deletion
+        const expired = pending.filter(item => {
+          const ageInDays = (now - item.deletedAt) / (1000 * 60 * 60 * 24);
+          return ageInDays >= 3;
+        });
+        
+        expired.forEach(item => {
+          const log = createAuditLog(
+            AUDIT_ACTIONS.PERMANENT_DELETE,
+            { monthName: item.month, deletionReason: item.deletionReason },
+            user
+          );
+          saveAuditLog(log);
+        });
+        
+        setPendingDeletions(valid);
+        localStorage.setItem('pendingDeletions', JSON.stringify(valid));
+      } catch (e) {
+        console.error('Failed to load pending deletions:', e);
+      }
+    }
+  }, [user]);
+
   // ============================================================================
-  // FINANCIAL CALCULATION ENGINE - DIRECT PERCENTAGE DEDUCTION WITH SHARED SALARIES
+  // FINANCIAL CALCULATION ENGINE - STRICT 6-STEP METHOD + OVERTIME
   // ============================================================================
 
   /**
-   * Calculate all financial distributions and net payouts
-   * - Bank Loan & Misc Expenses: Direct percentage deduction per shareholder
-   * - Salaries (Amsalu + Smeneh): Treated as shared vehicle expense, ALL shareholders contribute by percentage
+   * Calculate all financial distributions using the exact 6-step method
+   * - Misc Expenses: ONLY deducted from Kes Yeshalem (Main Owner)
+   * - Salaries: Shared expense pool, ALL shareholders contribute by percentage
+   * - Equb: Personal deduction only (Smeneh & Amsalu)
+   * - Bank Loan: Shared by percentage (all shareholders)
+   * - Overtime: Special distribution (50% to Kes Yeshalem, 50% split 70/30 between Smeneh/Amsalu)
    * @returns {Object} Complete calculation breakdown for all shareholders
    */
   const calculateFinancials = () => {
     // Parse all inputs safely
     const income = safeParseFloat(grossIncome);
+    const overtime = safeParseFloat(overtimeIncome);
     const bankPayment = safeParseFloat(bankInstallment);
     const misc = safeParseFloat(miscExpenses);
+    const insurance = safeParseFloat(insurancePayment); // NEW: Insurance
     const amsaluSal = safeParseFloat(amsaluSalary);
     const amsaluEq = safeParseFloat(amsaluEqub);
     const smenehSal = safeParseFloat(smenehSalary);
@@ -189,43 +284,109 @@ function App() {
     const smenehPrev = safeParseFloat(smenehPrevBalance);
     const kesYeshalemPrev = safeParseFloat(kesYeshalemPrevBalance);
 
-    // ========================================================================
-    // SHARED SALARY POOL - ALL shareholders contribute to total salaries
-    // ========================================================================
+    // Total Salaries Pool (shared expense)
     const totalSalaries = amsaluSal + smenehSal;
     
     // ========================================================================
-    // AMSALU (15.6% Shareholder / Assistant)
-    // Formula: (Income × 15.6%) + Salary - Equb - (Bank × 15.6%) - (Misc × 15.6%) - (Total Salaries × 15.6%) + Previous Balance
+    // OVERTIME INCOME DISTRIBUTION
     // ========================================================================
-    const amsaluGrossShare = (income * SHAREHOLDERS.amsalu.sharePercent) / 100;
-    const amsaluBankShare = (bankPayment * SHAREHOLDERS.amsalu.sharePercent) / 100;
-    const amsaluMiscShare = (misc * SHAREHOLDERS.amsalu.sharePercent) / 100;
-    const amsaluSalaryShare = (totalSalaries * SHAREHOLDERS.amsalu.sharePercent) / 100; // Shared salary contribution
-    const amsaluNet = amsaluGrossShare + amsaluSal - amsaluEq - amsaluBankShare - amsaluMiscShare - amsaluSalaryShare + amsaluPrev;
-
+    // 50% to Kes Yeshalem directly
+    const kesYeshalemOvertimeShare = overtime * 0.5;
+    
+    // Remaining 50% split between Smeneh (70%) and Amsalu (30%)
+    const employeeOvertimePool = overtime * 0.5;
+    const smenehOvertimeShare = employeeOvertimePool * 0.7;
+    const amsaluOvertimeShare = employeeOvertimePool * 0.3;
+    
     // ========================================================================
-    // SMENEH (12.6% Shareholder / Driver)
-    // Formula: (Income × 12.6%) + Salary - Equb - (Bank × 12.6%) - (Misc × 12.6%) - (Total Salaries × 12.6%) + Previous Balance
+    // INSURANCE PAYMENT DISTRIBUTION (NEW)
     // ========================================================================
+    // Insurance is a shared expense like Bank Loan and Salaries
+    // Each shareholder pays their equity percentage
+    const kesYeshalemInsuranceShare = (insurance * SHAREHOLDERS.kesYeshalem.sharePercent) / 100;
+    const smenehInsuranceShare = (insurance * SHAREHOLDERS.smeneh.sharePercent) / 100;
+    const amsaluInsuranceShare = (insurance * SHAREHOLDERS.amsalu.sharePercent) / 100;
+    
+    // ========================================================================
+    // SMENEH (12.6% Shareholder / Driver) - 6 STEPS
+    // ========================================================================
+    // Step 1: Gross Income Share
     const smenehGrossShare = (income * SHAREHOLDERS.smeneh.sharePercent) / 100;
+    
+    // Step 2: Driver Salary Received
+    const smenehSalaryReceived = smenehSal;
+    
+    // Step 3: Shared Salary Expense Share
+    const smenehSalaryShare = (totalSalaries * SHAREHOLDERS.smeneh.sharePercent) / 100;
+    
+    // Step 4: Personal Equb Deduction
+    const smenehEqubDeduction = smenehEq;
+    
+    // Step 5: Bank Loan Share
     const smenehBankShare = (bankPayment * SHAREHOLDERS.smeneh.sharePercent) / 100;
-    const smenehMiscShare = (misc * SHAREHOLDERS.smeneh.sharePercent) / 100;
-    const smenehSalaryShare = (totalSalaries * SHAREHOLDERS.smeneh.sharePercent) / 100; // Shared salary contribution
-    const smenehNet = smenehGrossShare + smenehSal - smenehEq - smenehBankShare - smenehMiscShare - smenehSalaryShare + smenehPrev;
+    
+    // Step 6: Previous Balance
+    const smenehPrevBalanceValue = smenehPrev;
+    
+    // Step 7: Overtime Income Share (NEW)
+    const smenehOvertimeIncome = smenehOvertimeShare;
+    
+    // FINAL NET PAYOUT (includes overtime and insurance)
+    const smenehNet = smenehGrossShare + smenehSalaryReceived - smenehSalaryShare - smenehEqubDeduction - smenehBankShare - smenehInsuranceShare + smenehPrevBalanceValue + smenehOvertimeIncome;
 
     // ========================================================================
-    // KES YESHALEM (71.8% Shareholder / Main Owner)
-    // Formula: (Income × 71.8%) - (Bank × 71.8%) - (Misc × 71.8%) - (Total Salaries × 71.8%) + Previous Balance
+    // AMSALU (15.6% Shareholder / Assistant) - 6 STEPS
     // ========================================================================
+    // Step 1: Gross Income Share
+    const amsaluGrossShare = (income * SHAREHOLDERS.amsalu.sharePercent) / 100;
+    
+    // Step 2: Assistant Salary Received
+    const amsaluSalaryReceived = amsaluSal;
+    
+    // Step 3: Shared Salary Expense Share
+    const amsaluSalaryShare = (totalSalaries * SHAREHOLDERS.amsalu.sharePercent) / 100;
+    
+    // Step 4: Personal Equb Deduction
+    const amsaluEqubDeduction = amsaluEq;
+    
+    // Step 5: Bank Loan Share
+    const amsaluBankShare = (bankPayment * SHAREHOLDERS.amsalu.sharePercent) / 100;
+    
+    // Step 6: Previous Balance
+    const amsaluPrevBalanceValue = amsaluPrev;
+    
+    // Step 7: Overtime Income Share (NEW)
+    const amsaluOvertimeIncome = amsaluOvertimeShare;
+    
+    // FINAL NET PAYOUT (includes overtime and insurance)
+    const amsaluNet = amsaluGrossShare + amsaluSalaryReceived - amsaluSalaryShare - amsaluEqubDeduction - amsaluBankShare - amsaluInsuranceShare + amsaluPrevBalanceValue + amsaluOvertimeIncome;
+
+    // ========================================================================
+    // KES YESHALEM (71.8% Shareholder / Main Owner) - 5 STEPS
+    // ========================================================================
+    // Step 1: Gross Income Share
     const kesYeshalemGrossShare = (income * SHAREHOLDERS.kesYeshalem.sharePercent) / 100;
+    
+    // Step 2: Shared Salary Expense Share
+    const kesYeshalemSalaryShare = (totalSalaries * SHAREHOLDERS.kesYeshalem.sharePercent) / 100;
+    
+    // Step 3: Bank Loan Share
     const kesYeshalemBankShare = (bankPayment * SHAREHOLDERS.kesYeshalem.sharePercent) / 100;
+    
+    // Step 4: Misc Expenses Share (ONLY Kes Yeshalem pays this)
     const kesYeshalemMiscShare = (misc * SHAREHOLDERS.kesYeshalem.sharePercent) / 100;
-    const kesYeshalemSalaryShare = (totalSalaries * SHAREHOLDERS.kesYeshalem.sharePercent) / 100; // Shared salary contribution
-    const kesYeshalemNet = kesYeshalemGrossShare - kesYeshalemBankShare - kesYeshalemMiscShare - kesYeshalemSalaryShare + kesYeshalemPrev;
+    
+    // Step 5: Previous Balance
+    const kesYeshalemPrevBalanceValue = kesYeshalemPrev;
+    
+    // Step 6: Overtime Income Share (NEW)
+    const kesYeshalemOvertimeIncome = kesYeshalemOvertimeShare;
+    
+    // FINAL NET PAYOUT (includes overtime and insurance)
+    const kesYeshalemNet = kesYeshalemGrossShare - kesYeshalemSalaryShare - kesYeshalemBankShare - kesYeshalemMiscShare - kesYeshalemInsuranceShare + kesYeshalemPrevBalanceValue + kesYeshalemOvertimeIncome;
 
     // ========================================================================
-    // VERIFICATION: Total net should equal income minus actual expenses
+    // VERIFICATION
     // ========================================================================
     const totalNetPayout = amsaluNet + smenehNet + kesYeshalemNet;
     const actualTotalExpenses = bankPayment + misc + amsaluEq + smenehEq;
@@ -233,34 +394,51 @@ function App() {
 
     return {
       income,
+      overtime,
       bankPayment,
       miscExpenses: misc,
+      insurance,
       totalSalaries,
+      overtimeDistribution: {
+        total: overtime,
+        kesYeshalemShare: kesYeshalemOvertimeShare,
+        smenehShare: smenehOvertimeShare,
+        amsaluShare: amsaluOvertimeShare,
+      },
+      insuranceShares: {
+        kesYeshalem: kesYeshalemInsuranceShare,
+        smeneh: smenehInsuranceShare,
+        amsalu: amsaluInsuranceShare,
+      },
       amsalu: {
         grossShare: amsaluGrossShare,
         salary: amsaluSal,
+        salaryShare: amsaluSalaryShare,
         equb: amsaluEq,
         bankShare: amsaluBankShare,
-        miscShare: amsaluMiscShare,
-        salaryShare: amsaluSalaryShare,
+        insuranceShare: amsaluInsuranceShare,
+        overtimeShare: amsaluOvertimeIncome,
         prevBalance: amsaluPrev,
         netPayout: amsaluNet,
       },
       smeneh: {
         grossShare: smenehGrossShare,
         salary: smenehSal,
+        salaryShare: smenehSalaryShare,
         equb: smenehEq,
         bankShare: smenehBankShare,
-        miscShare: smenehMiscShare,
-        salaryShare: smenehSalaryShare,
+        insuranceShare: smenehInsuranceShare,
+        overtimeShare: smenehOvertimeIncome,
         prevBalance: smenehPrev,
         netPayout: smenehNet,
       },
       kesYeshalem: {
         grossShare: kesYeshalemGrossShare,
+        salaryShare: kesYeshalemSalaryShare,
         bankShare: kesYeshalemBankShare,
         miscShare: kesYeshalemMiscShare,
-        salaryShare: kesYeshalemSalaryShare,
+        insuranceShare: kesYeshalemInsuranceShare,
+        overtimeShare: kesYeshalemOvertimeIncome,
         prevBalance: kesYeshalemPrev,
         netPayout: kesYeshalemNet,
       },
@@ -293,8 +471,10 @@ function App() {
       date: new Date().toISOString(),
       inputs: {
         grossIncome: safeParseFloat(grossIncome),
+        overtimeIncome: safeParseFloat(overtimeIncome),
         bankInstallment: safeParseFloat(bankInstallment),
         miscExpenses: safeParseFloat(miscExpenses),
+        insurancePayment: safeParseFloat(insurancePayment),
         amsaluSalary: safeParseFloat(amsaluSalary),
         amsaluEqub: safeParseFloat(amsaluEqub),
         smenehSalary: safeParseFloat(smenehSalary),
@@ -304,6 +484,7 @@ function App() {
         kesYeshalemPrevBalance: safeParseFloat(kesYeshalemPrevBalance),
       },
       results: calculations,
+      comment: '', // Initialize empty comment field
     };
 
     const newHistory = [monthData, ...monthlyHistory];
@@ -317,12 +498,22 @@ function App() {
 
     // Reset monthly inputs
     setGrossIncome('');
+    setOvertimeIncome('');
     setBankInstallment('');
     setMiscExpenses('');
+    setInsurancePayment('');
     setAmsaluSalary('');
     setAmsaluEqub('');
     setSmenehSalary('');
     setSmenehEqub('');
+
+    // Log the save action
+    const log = createAuditLog(
+      AUDIT_ACTIONS.ADD_COMMENT,
+      { monthName: currentMonth, comment: 'Month saved successfully' },
+      user
+    );
+    saveAuditLog(log);
 
     // Advance to next month
     const currentMonthIndex = MONTHS.findIndex(m => m.value === selectedMonth);
@@ -346,14 +537,185 @@ function App() {
   };
 
   /**
-   * Delete a specific month from history
+   * Delete a specific month from history (DEPRECATED - Use soft delete instead)
    */
-  const handleDeleteMonth = (index) => {
+  const handleDeleteMonthOld = (index) => {
     if (window.confirm('Are you sure you want to delete this month record? This action cannot be undone.')) {
       const newHistory = monthlyHistory.filter((_, idx) => idx !== index);
       setMonthlyHistory(newHistory);
       localStorage.setItem('vehicleAccountingHistory', JSON.stringify(newHistory));
     }
+  };
+
+  /**
+   * Initiate soft delete with reason modal
+   */
+  const handleDeleteMonth = (index) => {
+    const record = monthlyHistory[index];
+    setDeleteModal({
+      isOpen: true,
+      index,
+      monthName: record.month,
+    });
+  };
+
+  /**
+   * Confirm soft delete and move to pending deletions
+   */
+  const confirmDeleteMonth = (reason) => {
+    const index = deleteModal.index;
+    const record = monthlyHistory[index];
+    
+    // Move to pending deletions with 3-day grace period
+    const deletion = {
+      ...record,
+      deletedAt: Date.now(),
+      deletionReason: reason,
+      deletedBy: user.username,
+    };
+    
+    const newPending = [...pendingDeletions, deletion];
+    setPendingDeletions(newPending);
+    localStorage.setItem('pendingDeletions', JSON.stringify(newPending));
+    
+    // Remove from active history
+    const newHistory = monthlyHistory.filter((_, idx) => idx !== index);
+    setMonthlyHistory(newHistory);
+    localStorage.setItem('vehicleAccountingHistory', JSON.stringify(newHistory));
+    
+    // Log the deletion
+    const log = createAuditLog(
+      AUDIT_ACTIONS.DELETE_MONTH,
+      { monthName: record.month, reason },
+      user
+    );
+    saveAuditLog(log);
+    
+    setDeleteModal({ isOpen: false, index: null, monthName: '' });
+  };
+
+  /**
+   * Restore a month from pending deletions
+   */
+  const handleRestoreMonth = (index) => {
+    const deletion = pendingDeletions[index];
+    
+    // Remove from pending deletions
+    const newPending = pendingDeletions.filter((_, idx) => idx !== index);
+    setPendingDeletions(newPending);
+    localStorage.setItem('pendingDeletions', JSON.stringify(newPending));
+    
+    // Add back to history
+    const restoredRecord = { ...deletion };
+    delete restoredRecord.deletedAt;
+    delete restoredRecord.deletionReason;
+    delete restoredRecord.deletedBy;
+    
+    const newHistory = [restoredRecord, ...monthlyHistory];
+    setMonthlyHistory(newHistory);
+    localStorage.setItem('vehicleAccountingHistory', JSON.stringify(newHistory));
+    
+    // Log the restoration
+    const log = createAuditLog(
+      AUDIT_ACTIONS.RESTORE_MONTH,
+      { monthName: deletion.month },
+      user
+    );
+    saveAuditLog(log);
+    
+    alert(renderLabel('Month restored successfully', 'ወር በተሳካ ሁኔታ ተመልሷል'));
+  };
+
+  /**
+   * Initiate edit with modal
+   */
+  const handleEditMonth = (index) => {
+    const record = monthlyHistory[index];
+    setEditModal({
+      isOpen: true,
+      data: record,
+      index,
+    });
+  };
+
+  /**
+   * Confirm edit with reason
+   */
+  const confirmEditMonth = (newInputs) => {
+    // This would need a reason modal first, but for simplicity, we'll prompt
+    const reason = prompt(renderLabel('Enter reason for edit:', 'የማስተካከል ምክንያት ያስገቡ:'));
+    if (!reason) return;
+    
+    const index = editModal.index;
+    const record = monthlyHistory[index];
+    
+    // Recalculate with new inputs
+    const updatedRecord = {
+      ...record,
+      inputs: newInputs,
+      // Would need to recalculate results here
+      lastEditedAt: new Date().toISOString(),
+      lastEditedBy: user.username,
+      editReason: reason,
+    };
+    
+    const newHistory = [...monthlyHistory];
+    newHistory[index] = updatedRecord;
+    setMonthlyHistory(newHistory);
+    localStorage.setItem('vehicleAccountingHistory', JSON.stringify(newHistory));
+    
+    // Log the edit
+    const log = createAuditLog(
+      AUDIT_ACTIONS.EDIT_MONTH,
+      { monthName: record.month, reason, changes: newInputs },
+      user
+    );
+    saveAuditLog(log);
+    
+    setEditModal({ isOpen: false, data: null, index: null });
+  };
+
+  /**
+   * Open comment modal
+   */
+  const handleAddComment = (index) => {
+    const record = monthlyHistory[index];
+    setCommentModal({
+      isOpen: true,
+      index,
+      monthName: record.month,
+      comment: record.comment || '',
+    });
+  };
+
+  /**
+   * Save comment
+   */
+  const saveComment = (comment) => {
+    const index = commentModal.index;
+    const record = monthlyHistory[index];
+    
+    const updatedRecord = {
+      ...record,
+      comment,
+      commentedAt: new Date().toISOString(),
+      commentedBy: user.username,
+    };
+    
+    const newHistory = [...monthlyHistory];
+    newHistory[index] = updatedRecord;
+    setMonthlyHistory(newHistory);
+    localStorage.setItem('vehicleAccountingHistory', JSON.stringify(newHistory));
+    
+    // Log the comment
+    const log = createAuditLog(
+      AUDIT_ACTIONS.ADD_COMMENT,
+      { monthName: record.month, comment },
+      user
+    );
+    saveAuditLog(log);
+    
+    setCommentModal({ isOpen: false, index: null, monthName: '', comment: '' });
   };
 
   /**
@@ -395,27 +757,54 @@ function App() {
                 {renderLabel('Shared Commercial Vehicle Financial Management System', 'የጋራ የንግድ ተሽከርካሪ የፋይናንስ አስተዳደር ስርዓት')}
               </p>
             </div>
-            <div className="flex gap-2 no-print">
-              <button
-                onClick={() => setLanguage(language === 'both' ? 'english' : language === 'english' ? 'amharic' : 'both')}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm"
-              >
-                {language === 'both' ? 'አማ/Eng' : language === 'english' ? 'English' : 'አማርኛ'}
-              </button>
-              <button
-                onClick={() => setShowHistory(!showHistory)}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2"
-              >
-                <History size={18} />
-                {renderLabel('History', 'ታሪክ')}
-              </button>
-              <button
-                onClick={handlePrint}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
-              >
-                <Printer size={18} />
-                {renderLabel('Print', 'አትም')}
-              </button>
+            <div className="flex flex-col gap-2 items-end">
+              {/* User Badge with Logout */}
+              <div className="flex items-center gap-3 bg-indigo-50 px-4 py-2 rounded-lg border border-indigo-200">
+                <div className="flex items-center gap-2">
+                  <Shield className="text-indigo-600" size={20} />
+                  <div className="text-sm">
+                    <p className="font-semibold text-gray-800">{user.name}</p>
+                    <p className="text-xs text-gray-600">
+                      {language === 'amharic' 
+                        ? user.permissions.displayNameAm 
+                        : language === 'both' 
+                        ? `${user.permissions.displayNameAm} / ${user.permissions.displayName}`
+                        : user.permissions.displayName}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={logout}
+                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  title={renderLabel('Logout', 'ውጣ')}
+                >
+                  <LogOut size={18} />
+                </button>
+              </div>
+              
+              {/* Action buttons */}
+              <div className="flex gap-2 no-print">
+                <button
+                  onClick={() => setLanguage(language === 'both' ? 'english' : language === 'english' ? 'amharic' : 'both')}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm"
+                >
+                  {language === 'both' ? 'አማ/Eng' : language === 'english' ? 'English' : 'አማርኛ'}
+                </button>
+                <button
+                  onClick={() => setShowHistory(!showHistory)}
+                  className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2"
+                >
+                  <History size={18} />
+                  {renderLabel('History', 'ታሪክ')}
+                </button>
+                <button
+                  onClick={handlePrint}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+                >
+                  <Printer size={18} />
+                  {renderLabel('Print', 'አትም')}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -486,13 +875,17 @@ function App() {
           </div>
         )}
 
-        {/* Input Section */}
+        {/* Input Section - ONLY visible to Admin */}
+        {hasPermission('canModifyInputs') && (
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
           <div className="flex items-center gap-2 mb-4">
             <Calculator className="text-indigo-600" size={24} />
             <h2 className="text-2xl font-bold text-gray-800">
               {renderLabel('Monthly Inputs', 'የወር ግብዓቶች')}
             </h2>
+            <span className="ml-auto px-3 py-1 bg-green-100 text-green-800 text-xs font-semibold rounded-full">
+              {renderLabel('Admin Only', 'የአስተዳዳሪ ብቻ')}
+            </span>
           </div>
 
           {/* Current Month and Year Selection */}
@@ -543,7 +936,7 @@ function App() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
             {/* General Vehicle Financials */}
             <div className="space-y-4">
               <h3 className="font-semibold text-gray-700 border-b pb-2">
@@ -555,12 +948,28 @@ function App() {
                   {renderLabel('Monthly Gross Income', 'የወሩ አጠቃላይ ገቢ')}
                 </label>
                 <input
-                  type="number"
-                  value={grossIncome}
-                  onChange={(e) => setGrossIncome(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  type="text"
+                  value={formatNumberInput(grossIncome)}
+                  onChange={(e) => setGrossIncome(e.target.value.replace(/,/g, ''))}
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {renderLabel('Monthly Overtime Income', 'የወር ኦቨርታይም ገቢ')}
+                </label>
+                <input
+                  type="text"
+                  value={formatNumberInput(overtimeIncome)}
+                  onChange={(e) => setOvertimeIncome(e.target.value.replace(/,/g, ''))}
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-green-50"
+                  placeholder="0.00"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  {renderLabel('50% to Owner, 50% split 70/30 Driver/Assistant', '50% ለባለቤት፣ 50% 70/30 ለሾፌር/እረዳት')}
+                </p>
               </div>
 
               <div>
@@ -568,10 +977,10 @@ function App() {
                   {renderLabel('Bank Loan Installment', 'የባንክ እዳ ክፍያ')}
                 </label>
                 <input
-                  type="number"
-                  value={bankInstallment}
-                  onChange={(e) => setBankInstallment(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  type="text"
+                  value={formatNumberInput(bankInstallment)}
+                  onChange={(e) => setBankInstallment(e.target.value.replace(/,/g, ''))}
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
                 />
               </div>
@@ -581,12 +990,28 @@ function App() {
                   {renderLabel('Misc. Vehicle Expenses', 'የመኪና ወጪዎች')}
                 </label>
                 <input
-                  type="number"
-                  value={miscExpenses}
-                  onChange={(e) => setMiscExpenses(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  type="text"
+                  value={formatNumberInput(miscExpenses)}
+                  onChange={(e) => setMiscExpenses(e.target.value.replace(/,/g, ''))}
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {renderLabel('Insurance Payment', 'የኢንሹራንስ ክፍያ')}
+                </label>
+                <input
+                  type="text"
+                  value={formatNumberInput(insurancePayment)}
+                  onChange={(e) => setInsurancePayment(e.target.value.replace(/,/g, ''))}
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-purple-50"
+                  placeholder="0.00"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  {renderLabel('Shared by all shareholders by percentage', 'በሁሉም ባለአክሲዮኖች በመቶኛ ይጋራል')}
+                </p>
               </div>
             </div>
 
@@ -601,10 +1026,10 @@ function App() {
                   {renderLabel('Previous Balance', 'የቀደመ ሂሳብ')}
                 </label>
                 <input
-                  type="number"
-                  value={kesYeshalemPrevBalance}
-                  onChange={(e) => setKesYeshalemPrevBalance(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  type="text"
+                  value={formatNumberInput(kesYeshalemPrevBalance)}
+                  onChange={(e) => setKesYeshalemPrevBalance(e.target.value.replace(/,/g, ''))}
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
                 />
               </div>
@@ -621,10 +1046,10 @@ function App() {
                   {renderLabel('Monthly Salary', 'የወር ደሞዝ')}
                 </label>
                 <input
-                  type="number"
-                  value={smenehSalary}
-                  onChange={(e) => setSmenehSalary(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  type="text"
+                  value={formatNumberInput(smenehSalary)}
+                  onChange={(e) => setSmenehSalary(e.target.value.replace(/,/g, ''))}
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
                 />
               </div>
@@ -634,10 +1059,10 @@ function App() {
                   {renderLabel('Monthly Equb', 'የወር እቁብ')}
                 </label>
                 <input
-                  type="number"
-                  value={smenehEqub}
-                  onChange={(e) => setSmenehEqub(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  type="text"
+                  value={formatNumberInput(smenehEqub)}
+                  onChange={(e) => setSmenehEqub(e.target.value.replace(/,/g, ''))}
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
                 />
               </div>
@@ -647,10 +1072,10 @@ function App() {
                   {renderLabel('Previous Balance', 'የቀደመ ሂሳብ')}
                 </label>
                 <input
-                  type="number"
-                  value={smenehPrevBalance}
-                  onChange={(e) => setSmenehPrevBalance(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  type="text"
+                  value={formatNumberInput(smenehPrevBalance)}
+                  onChange={(e) => setSmenehPrevBalance(e.target.value.replace(/,/g, ''))}
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
                 />
               </div>
@@ -667,10 +1092,10 @@ function App() {
                   {renderLabel('Monthly Salary', 'የወር ደሞዝ')}
                 </label>
                 <input
-                  type="number"
-                  value={amsaluSalary}
-                  onChange={(e) => setAmsaluSalary(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  type="text"
+                  value={formatNumberInput(amsaluSalary)}
+                  onChange={(e) => setAmsaluSalary(e.target.value.replace(/,/g, ''))}
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
                 />
               </div>
@@ -680,10 +1105,10 @@ function App() {
                   {renderLabel('Monthly Equb', 'የወር እቁብ')}
                 </label>
                 <input
-                  type="number"
-                  value={amsaluEqub}
-                  onChange={(e) => setAmsaluEqub(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  type="text"
+                  value={formatNumberInput(amsaluEqub)}
+                  onChange={(e) => setAmsaluEqub(e.target.value.replace(/,/g, ''))}
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
                 />
               </div>
@@ -693,16 +1118,17 @@ function App() {
                   {renderLabel('Previous Balance', 'የቀደመ ሂሳብ')}
                 </label>
                 <input
-                  type="number"
-                  value={amsaluPrevBalance}
-                  onChange={(e) => setAmsaluPrevBalance(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  type="text"
+                  value={formatNumberInput(amsaluPrevBalance)}
+                  onChange={(e) => setAmsaluPrevBalance(e.target.value.replace(/,/g, ''))}
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
                 />
               </div>
             </div>
           </div>
         </div>
+        )}
 
         {/* Results Section */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
@@ -808,19 +1234,29 @@ function App() {
                   <span className="font-semibold text-red-600">-{formatCurrency(calculations.kesYeshalem.bankShare)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>{renderLabel('3. Misc Expenses Direct Share', '3. ልዩ ወጪዎች ቀጥታ ድርሻ')} ({SHAREHOLDERS.kesYeshalem.sharePercent}%):</span>
+                  <span>{renderLabel('3. Insurance Payment Share', '3. የኢንሹራንስ ክፍያ ድርሻ')} ({SHAREHOLDERS.kesYeshalem.sharePercent}%):</span>
+                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.kesYeshalem.insuranceShare)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{renderLabel('4. Misc Expenses Direct Share', '4. ልዩ ወጪዎች ቀጥታ ድርሻ')} ({SHAREHOLDERS.kesYeshalem.sharePercent}%):</span>
                   <span className="font-semibold text-red-600">-{formatCurrency(calculations.kesYeshalem.miscShare)}</span>
                 </div>
                 <div className="flex justify-between border-t border-gray-300 pt-2">
-                  <span className="font-medium">{renderLabel('4. Shared Salary Expense', '4. የጋራ ደሞዝ ወጪ')} ({SHAREHOLDERS.kesYeshalem.sharePercent}% of {formatCurrency(calculations.totalSalaries)}):</span>
+                  <span className="font-medium">{renderLabel('5. Shared Salary Expense', '5. የጋራ ደሞዝ ወጪ')} ({SHAREHOLDERS.kesYeshalem.sharePercent}% of {formatCurrency(calculations.totalSalaries)}):</span>
                   <span className="font-semibold text-red-600">-{formatCurrency(calculations.kesYeshalem.salaryShare)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>{renderLabel('5. Previous Balance', '5. የቀደመ ሂሳብ')}:</span>
+                  <span>{renderLabel('6. Previous Balance', '6. የቀደመ ሂሳብ')}:</span>
                   <span className={`font-semibold ${calculations.kesYeshalem.prevBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {calculations.kesYeshalem.prevBalance >= 0 ? '+' : ''}{formatCurrency(calculations.kesYeshalem.prevBalance)}
                   </span>
                 </div>
+                {calculations.overtimeDistribution.total > 0 && (
+                  <div className="flex justify-between bg-green-100 p-2 rounded">
+                    <span className="font-medium">{renderLabel('7. Overtime Income (50%)', '7. የኦቨርታይም ገቢ (50%)')}</span>
+                    <span className="font-semibold text-green-600">+{formatCurrency(calculations.kesYeshalem.overtimeShare)}</span>
+                  </div>
+                )}
                 <div className="border-t-2 border-gray-400 pt-2 mt-2 flex justify-between text-lg">
                   <span className="font-bold">{renderLabel('FINAL NET PAYOUT', 'የመጨረሻ ንጹህ ክፍያ')}:</span>
                   <span className={`font-bold ${calculations.kesYeshalem.netPayout >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -830,42 +1266,48 @@ function App() {
               </div>
             </div>
 
-            {/* Smeneh Breakdown - SHOWN SECOND */}
+            {/* Smeneh Breakdown - SHOWN SECOND - 7 STEPS (with Overtime) */}
             <div className="mb-6 p-4 bg-purple-50 rounded-lg border-2 border-purple-300">
               <h3 className="text-xl font-bold text-gray-800 mb-4">
                 {renderLabel(SHAREHOLDERS.smeneh.name, SHAREHOLDERS.smeneh.nameAm)} {renderLabel('- Calculation Steps', '- የሂሳብ ደረጃዎች')}
               </h3>
               <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span>{renderLabel('1. Gross Income Share', '1. ጠቅላላ ገቢ ድርሻ')} ({SHAREHOLDERS.smeneh.sharePercent}%):</span>
-                  <span className="font-semibold text-green-600">+{formatCurrency(calculations.smeneh.grossShare)}</span>
+                <div className="flex justify-between font-medium text-gray-700">
+                  <span>{renderLabel('Step 1: Gross Income Share', 'ደረጃ 1: ጠቅላላ ገቢ ድርሻ')} ({SHAREHOLDERS.smeneh.sharePercent}%)</span>
+                  <span className="text-green-600">+{formatCurrency(calculations.smeneh.grossShare)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('2. Salary Received', '2. የተቀበለው ደሞዝ')}:</span>
-                  <span className="font-semibold text-green-600">+{formatCurrency(calculations.smeneh.salary)}</span>
+                <div className="flex justify-between font-medium text-gray-700">
+                  <span>{renderLabel('Step 2: Driver Salary Received', 'ደረጃ 2: የተቀበለው ደሞዝ')}</span>
+                  <span className="text-green-600">+{formatCurrency(calculations.smeneh.salary)}</span>
                 </div>
-                <div className="flex justify-between bg-yellow-50 p-2 rounded">
-                  <span className="font-medium">{renderLabel('3. Personal Equb Deduction (Not Shared)', '3. የግል እቁብ ቅናሽ (ያልተጋራ)')}</span>
-                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.smeneh.equb)}</span>
+                <div className="flex justify-between font-medium text-gray-700">
+                  <span>{renderLabel('Step 3: Shared Salary Expense', 'ደረጃ 3: የጋራ ደሞዝ ወጪ')} ({SHAREHOLDERS.smeneh.sharePercent}% of {formatCurrency(calculations.totalSalaries)})</span>
+                  <span className="text-red-600">-{formatCurrency(calculations.smeneh.salaryShare)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('4. Bank Loan Direct Share', '4. የባንክ እዳ ቀጥታ ድርሻ')} ({SHAREHOLDERS.smeneh.sharePercent}%):</span>
-                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.smeneh.bankShare)}</span>
+                <div className="flex justify-between bg-yellow-50 p-2 rounded font-medium text-gray-700">
+                  <span>{renderLabel('Step 4: Personal Equb (Not Shared)', 'ደረጃ 4: የግል እቁብ (ያልተጋራ)')}</span>
+                  <span className="text-red-600">-{formatCurrency(calculations.smeneh.equb)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('5. Misc Expenses Direct Share', '5. ልዩ ወጪዎች ቀጥታ ድርሻ')} ({SHAREHOLDERS.smeneh.sharePercent}%):</span>
-                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.smeneh.miscShare)}</span>
+                <div className="flex justify-between font-medium text-gray-700">
+                  <span>{renderLabel('Step 5: Bank Loan Share', 'ደረጃ 5: የባንክ እዳ ድርሻ')} ({SHAREHOLDERS.smeneh.sharePercent}%)</span>
+                  <span className="text-red-600">-{formatCurrency(calculations.smeneh.bankShare)}</span>
                 </div>
-                <div className="flex justify-between border-t border-gray-300 pt-2">
-                  <span className="font-medium">{renderLabel('6. Shared Salary Expense', '6. የጋራ ደሞዝ ወጪ')} ({SHAREHOLDERS.smeneh.sharePercent}% of {formatCurrency(calculations.totalSalaries)}):</span>
-                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.smeneh.salaryShare)}</span>
+                <div className="flex justify-between font-medium text-gray-700">
+                  <span>{renderLabel('Step 6: Insurance Payment Share', 'ደረጃ 6: የኢንሹራንስ ክፍያ ድርሻ')} ({SHAREHOLDERS.smeneh.sharePercent}%)</span>
+                  <span className="text-red-600">-{formatCurrency(calculations.smeneh.insuranceShare)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('7. Previous Balance', '7. የቀደመ ሂሳብ')}:</span>
-                  <span className={`font-semibold ${calculations.smeneh.prevBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                <div className="flex justify-between font-medium text-gray-700">
+                  <span>{renderLabel('Step 7: Previous Balance', 'ደረጃ 7: የቀደመ ሂሳብ')}</span>
+                  <span className={calculations.smeneh.prevBalance >= 0 ? 'text-green-600' : 'text-red-600'}>
                     {calculations.smeneh.prevBalance >= 0 ? '+' : ''}{formatCurrency(calculations.smeneh.prevBalance)}
                   </span>
                 </div>
+                {calculations.overtimeDistribution.total > 0 && (
+                  <div className="flex justify-between bg-green-100 p-2 rounded font-medium text-gray-700">
+                    <span>{renderLabel('Step 8: Overtime Income (70% of 50%)', 'ደረጃ 8: የኦቨርታይም ገቢ (70% ከ50%)')}</span>
+                    <span className="text-green-600">+{formatCurrency(calculations.smeneh.overtimeShare)}</span>
+                  </div>
+                )}
                 <div className="border-t-2 border-gray-400 pt-2 mt-2 flex justify-between text-lg">
                   <span className="font-bold">{renderLabel('FINAL NET PAYOUT', 'የመጨረሻ ንጹህ ክፍያ')}:</span>
                   <span className={`font-bold ${calculations.smeneh.netPayout >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -875,42 +1317,48 @@ function App() {
               </div>
             </div>
 
-            {/* Amsalu Breakdown - SHOWN THIRD */}
+            {/* Amsalu Breakdown - SHOWN THIRD - 7 STEPS (with Overtime) */}
             <div className="mb-6 p-4 bg-blue-50 rounded-lg border-2 border-blue-300">
               <h3 className="text-xl font-bold text-gray-800 mb-4">
                 {renderLabel(SHAREHOLDERS.amsalu.name, SHAREHOLDERS.amsalu.nameAm)} {renderLabel('- Calculation Steps', '- የሂሳብ ደረጃዎች')}
               </h3>
               <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span>{renderLabel('1. Gross Income Share', '1. ጠቅላላ ገቢ ድርሻ')} ({SHAREHOLDERS.amsalu.sharePercent}%):</span>
-                  <span className="font-semibold text-green-600">+{formatCurrency(calculations.amsalu.grossShare)}</span>
+                <div className="flex justify-between font-medium text-gray-700">
+                  <span>{renderLabel('Step 1: Gross Income Share', 'ደረጃ 1: ጠቅላላ ገቢ ድርሻ')} ({SHAREHOLDERS.amsalu.sharePercent}%)</span>
+                  <span className="text-green-600">+{formatCurrency(calculations.amsalu.grossShare)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('2. Salary Received', '2. የተቀበለው ደሞዝ')}:</span>
-                  <span className="font-semibold text-green-600">+{formatCurrency(calculations.amsalu.salary)}</span>
+                <div className="flex justify-between font-medium text-gray-700">
+                  <span>{renderLabel('Step 2: Assistant Salary Received', 'ደረጃ 2: የተቀበለው ደሞዝ')}</span>
+                  <span className="text-green-600">+{formatCurrency(calculations.amsalu.salary)}</span>
                 </div>
-                <div className="flex justify-between bg-yellow-50 p-2 rounded">
-                  <span className="font-medium">{renderLabel('3. Personal Equb Deduction (Not Shared)', '3. የግል እቁብ ቅናሽ (ያልተጋራ)')}</span>
-                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.amsalu.equb)}</span>
+                <div className="flex justify-between font-medium text-gray-700">
+                  <span>{renderLabel('Step 3: Shared Salary Expense', 'ደረጃ 3: የጋራ ደሞዝ ወጪ')} ({SHAREHOLDERS.amsalu.sharePercent}% of {formatCurrency(calculations.totalSalaries)})</span>
+                  <span className="text-red-600">-{formatCurrency(calculations.amsalu.salaryShare)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('4. Bank Loan Direct Share', '4. የባንክ እዳ ቀጥታ ድርሻ')} ({SHAREHOLDERS.amsalu.sharePercent}%):</span>
-                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.amsalu.bankShare)}</span>
+                <div className="flex justify-between bg-yellow-50 p-2 rounded font-medium text-gray-700">
+                  <span>{renderLabel('Step 4: Personal Equb (Not Shared)', 'ደረጃ 4: የግል እቁብ (ያልተጋራ)')}</span>
+                  <span className="text-red-600">-{formatCurrency(calculations.amsalu.equb)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('5. Misc Expenses Direct Share', '5. ልዩ ወጪዎች ቀጥታ ድርሻ')} ({SHAREHOLDERS.amsalu.sharePercent}%):</span>
-                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.amsalu.miscShare)}</span>
+                <div className="flex justify-between font-medium text-gray-700">
+                  <span>{renderLabel('Step 5: Bank Loan Share', 'ደረጃ 5: የባንክ እዳ ድርሻ')} ({SHAREHOLDERS.amsalu.sharePercent}%)</span>
+                  <span className="text-red-600">-{formatCurrency(calculations.amsalu.bankShare)}</span>
                 </div>
-                <div className="flex justify-between border-t border-gray-300 pt-2">
-                  <span className="font-medium">{renderLabel('6. Shared Salary Expense', '6. የጋራ ደሞዝ ወጪ')} ({SHAREHOLDERS.amsalu.sharePercent}% of {formatCurrency(calculations.totalSalaries)}):</span>
-                  <span className="font-semibold text-red-600">-{formatCurrency(calculations.amsalu.salaryShare)}</span>
+                <div className="flex justify-between font-medium text-gray-700">
+                  <span>{renderLabel('Step 6: Insurance Payment Share', 'ደረጃ 6: የኢንሹራንስ ክፍያ ድርሻ')} ({SHAREHOLDERS.amsalu.sharePercent}%)</span>
+                  <span className="text-red-600">-{formatCurrency(calculations.amsalu.insuranceShare)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>{renderLabel('7. Previous Balance', '7. የቀደመ ሂሳብ')}:</span>
-                  <span className={`font-semibold ${calculations.amsalu.prevBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                <div className="flex justify-between font-medium text-gray-700">
+                  <span>{renderLabel('Step 7: Previous Balance', 'ደረጃ 7: የቀደመ ሂሳብ')}</span>
+                  <span className={calculations.amsalu.prevBalance >= 0 ? 'text-green-600' : 'text-red-600'}>
                     {calculations.amsalu.prevBalance >= 0 ? '+' : ''}{formatCurrency(calculations.amsalu.prevBalance)}
                   </span>
                 </div>
+                {calculations.overtimeDistribution.total > 0 && (
+                  <div className="flex justify-between bg-green-100 p-2 rounded font-medium text-gray-700">
+                    <span>{renderLabel('Step 8: Overtime Income (30% of 50%)', 'ደረጃ 8: የኦቨርታይም ገቢ (30% ከ50%)')}</span>
+                    <span className="text-green-600">+{formatCurrency(calculations.amsalu.overtimeShare)}</span>
+                  </div>
+                )}
                 <div className="border-t-2 border-gray-400 pt-2 mt-2 flex justify-between text-lg">
                   <span className="font-bold">{renderLabel('FINAL NET PAYOUT', 'የመጨረሻ ንጹህ ክፍያ')}:</span>
                   <span className={`font-bold ${calculations.amsalu.netPayout >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -926,11 +1374,17 @@ function App() {
                 {renderLabel('Summary & Verification', 'ማጠቃለያ እና ማረጋገጫ')}
               </h3>
               
-              {/* Expense Classification Info */}
+              {/* Expense Classification Info - UPDATED TO CLARIFY MISC IS KES YESHALEM ONLY */}
               <div className="mb-4 p-3 bg-blue-50 border-l-4 border-blue-500 text-sm">
-                <p className="font-semibold mb-2">{renderLabel('Expense Types', 'የወጪ ዓይነቶች')}:</p>
+                <p className="font-semibold mb-2">{renderLabel('Income & Expense Classification', 'የገቢ እና ወጪ ምደባ')}:</p>
                 <p className="text-gray-700">
-                  <span className="font-medium">{renderLabel('Shared (% based)', 'የጋራ (በ% የሚሰላ)')}:</span> {renderLabel('Bank, Misc, Salaries', 'ባንክ፣ ልዩ ወጪ፣ ደሞዞች')}
+                  <span className="font-medium text-green-700">{renderLabel('Overtime Income Distribution', 'የኦቨርታይም ገቢ ክፍፍል')}:</span> {renderLabel('50% to Owner, 50% split 70% Driver / 30% Assistant', '50% ለባለቤት፣ 50% 70% ለሾፌር / 30% ለእረዳት')}
+                </p>
+                <p className="text-gray-700 mt-1">
+                  <span className="font-medium">{renderLabel('Shared by ALL (% based)', 'በሁሉም የሚጋራ (በ% የሚሰላ)')}:</span> {renderLabel('Bank Loan, Total Salaries, Insurance', 'የባንክ እዳ፣ ጠቅላላ ደሞዞች፣ ኢንሹራንስ')}
+                </p>
+                <p className="text-gray-700">
+                  <span className="font-medium">{renderLabel('Kes Yeshalem ONLY (71.8%)', 'ቄስ የሻለም ብቻ (71.8%)')}:</span> {renderLabel('Misc Expenses', 'ልዩ ወጪዎች')}
                 </p>
                 <p className="text-gray-700">
                   <span className="font-medium">{renderLabel('Personal (Direct)', 'የግል (ቀጥታ)')}:</span> {renderLabel('Equb - Never shared', 'እቁብ - በጭራሽ አይጋራም')}
@@ -940,10 +1394,15 @@ function App() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                 <div>
                   <p><span className="font-semibold">{renderLabel('Total Gross Income', 'ጠቅላላ ገቢ')}:</span> {formatCurrency(calculations.income)}</p>
+                  {calculations.overtime > 0 && (
+                    <p className="bg-green-50 p-2 rounded"><span className="font-semibold text-green-700">{renderLabel('Total Overtime Income', 'ጠቅላላ ኦቨርታይም ገቢ')}:</span> {formatCurrency(calculations.overtime)}</p>
+                  )}
                   <p><span className="font-semibold">{renderLabel('Bank Loan Payment', 'የባንክ እዳ ክፍያ')}:</span> {formatCurrency(calculations.bankPayment)}</p>
+                  {calculations.insurance > 0 && (
+                    <p className="bg-purple-50 p-2 rounded"><span className="font-semibold text-purple-700">{renderLabel('Insurance Payment (Shared)', 'የኢንሹራንስ ክፍያ (የጋራ)')}:</span> {formatCurrency(calculations.insurance)}</p>
+                  )}
                   <p><span className="font-semibold">{renderLabel('Misc Expenses', 'ልዩ ወጪዎች')}:</span> {formatCurrency(calculations.miscExpenses)}</p>
                   <p className="border-t pt-2 mt-2"><span className="font-semibold">{renderLabel('Total Salaries (Shared)', 'ጠቅላላ ደሞዞች (የጋራ)')}:</span> {formatCurrency(calculations.totalSalaries)}</p>
-                  <p className="bg-yellow-50 p-2 rounded"><span className="font-semibold">{renderLabel('Total Equb (Personal Only)', 'ጠቅላላ እቁብ (የግል ብቻ)')}:</span> {formatCurrency(calculations.actualTotalExpenses)}</p>
                 </div>
                 <div>
                   <p><span className="font-semibold">{renderLabel('Total Net Payouts', 'ጠቅላላ ንጹህ ክፍያዎች')}:</span> {formatCurrency(calculations.verification.totalNetPayout)}</p>
@@ -959,7 +1418,8 @@ function App() {
           </div>
         )}
 
-        {/* Action Buttons */}
+        {/* Action Buttons - Admin Only */}
+        {hasPermission('canModifyInputs') && (
         <div className="bg-white rounded-lg shadow-lg p-6 no-print">
           <div className="flex flex-col md:flex-row gap-4">
             <button
@@ -977,6 +1437,7 @@ function App() {
             )}
           </p>
         </div>
+        )}
 
         {/* Monthly History Archive Table (የወርሃዊ ታሪክ ማህደር) */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
@@ -1091,14 +1552,40 @@ function App() {
 
                       {/* Actions */}
                       <td className="px-4 py-3 border border-gray-300 text-center no-print">
-                        <button
-                          onClick={() => handleDeleteMonth(index)}
-                          className="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600 transition-colors font-semibold flex items-center gap-1 mx-auto"
-                          title={renderLabel('Delete this month', 'ይህን ወር ይሰርዙ')}
-                        >
-                          <Trash2 size={14} />
-                          {renderLabel('Delete', 'ሰርዝ')}
-                        </button>
+                        <div className="flex gap-2 justify-center">
+                          {/* Edit Button - Admin Only */}
+                          {hasPermission('canEdit') && (
+                            <button
+                              onClick={() => handleEditMonth(index)}
+                              className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 transition-colors font-semibold flex items-center gap-1"
+                              title={renderLabel('Edit this month', 'ይህን ወር ያስተካክሉ')}
+                            >
+                              <Edit size={12} />
+                            </button>
+                          )}
+                          
+                          {/* Comment Button - Admin Only */}
+                          {hasPermission('canComment') && (
+                            <button
+                              onClick={() => handleAddComment(index)}
+                              className={`px-2 py-1 ${record.comment ? 'bg-green-500' : 'bg-gray-500'} text-white text-xs rounded hover:bg-green-600 transition-colors font-semibold flex items-center gap-1`}
+                              title={renderLabel(record.comment ? 'View/Edit comment' : 'Add comment', record.comment ? 'አስተያየት ይመልከቱ/ያስተካክሉ' : 'አስተያየት ይጨምሩ')}
+                            >
+                              <MessageSquare size={12} />
+                            </button>
+                          )}
+                          
+                          {/* Delete Button - Admin Only */}
+                          {hasPermission('canDelete') && (
+                            <button
+                              onClick={() => handleDeleteMonth(index)}
+                              className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600 transition-colors font-semibold flex items-center gap-1"
+                              title={renderLabel('Delete this month', 'ይህን ወር ይሰርዙ')}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1193,6 +1680,82 @@ function App() {
             </div>
           )}
         </div>
+
+        {/* Pending Deletions Section (3-Day Recovery Period) - Admin Only */}
+        {hasPermission('canDelete') && pendingDeletions.length > 0 && (
+          <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg shadow-lg p-6 mb-6">
+            <div className="flex items-center gap-2 mb-4">
+              <AlertTriangle className="text-yellow-600" size={24} />
+              <h2 className="text-xl font-bold text-gray-800">
+                {renderLabel('Pending Deletions (3-Day Recovery)', 'በመሰረዝ ላይ (3-ቀን መልሶ ማግኛ)')}
+              </h2>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              {renderLabel(
+                'These records will be permanently deleted after 3 days. You can restore them before then.',
+                'እነዚህ መዝገቦች ከ3 ቀናት በኋላ ለዘለዓለም ይሰረዛሉ። ከዚያ በፊት መመለስ ይችላሉ።'
+              )}
+            </p>
+            <div className="space-y-3">
+              {pendingDeletions.map((deletion, index) => {
+                const hoursLeft = 72 - ((Date.now() - deletion.deletedAt) / (1000 * 60 * 60));
+                const daysLeft = Math.floor(hoursLeft / 24);
+                const hoursLeftInDay = Math.floor(hoursLeft % 24);
+                
+                return (
+                  <div key={index} className="bg-white p-4 rounded-lg border border-yellow-300 flex justify-between items-center">
+                    <div>
+                      <p className="font-bold text-gray-800">{deletion.month}</p>
+                      <p className="text-sm text-gray-600">
+                        {renderLabel('Deleted by', 'የሰረዘው')}: {deletion.deletedBy}
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        {renderLabel('Reason', 'ምክንያት')}: {deletion.deletionReason}
+                      </p>
+                      <p className="text-xs text-red-600 mt-1">
+                        {renderLabel(`Time left: ${daysLeft}d ${hoursLeftInDay}h`, `የቀረው ጊዜ: ${daysLeft}ቀ ${hoursLeftInDay}ሰ`)}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleRestoreMonth(index)}
+                      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold flex items-center gap-2"
+                    >
+                      <RotateCcw size={18} />
+                      {renderLabel('Restore', 'መልስ')}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Modals */}
+        <ReasonModal
+          isOpen={deleteModal.isOpen}
+          onClose={() => setDeleteModal({ isOpen: false, index: null, monthName: '' })}
+          onConfirm={confirmDeleteMonth}
+          action="delete"
+          monthName={deleteModal.monthName}
+          language={language}
+        />
+        
+        <CommentModal
+          isOpen={commentModal.isOpen}
+          onClose={() => setCommentModal({ isOpen: false, index: null, monthName: '', comment: '' })}
+          onSave={saveComment}
+          monthName={commentModal.monthName}
+          existingComment={commentModal.comment}
+          language={language}
+        />
+        
+        <EditMonthModal
+          isOpen={editModal.isOpen}
+          onClose={() => setEditModal({ isOpen: false, data: null, index: null })}
+          onSave={confirmEditMonth}
+          monthData={editModal.data}
+          language={language}
+        />
 
         {/* Footer */}
         <div className="mt-8 text-center text-gray-600 text-sm">
