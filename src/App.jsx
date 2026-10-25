@@ -1,9 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Save, FileText, Calculator, Info, History, Printer, Trash2, Edit, MessageSquare, RotateCcw, Shield, LogOut, AlertTriangle, Trash, User } from 'lucide-react';
+import { Save, FileText, Calculator, Info, History, Printer, Trash2, Edit, MessageSquare, RotateCcw, Shield, LogOut, AlertTriangle, Trash, User, Eye, X } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import LoginPage from './LoginPage';
 import { ReasonModal, CommentModal, EditMonthModal, ClearHistoryModal } from './Modals';
 import { createAuditLog, saveAuditLog, AUDIT_ACTIONS } from './AuditLog';
+import { 
+  supabase, 
+  saveMonthlyHistory, 
+  loadMonthlyHistory, 
+  saveRecycleBin, 
+  loadRecycleBin,
+  saveCycleArchives,
+  loadCycleArchives,
+  migrateFromLocalStorage 
+} from './supabaseClient';
 
 // ============================================================================
 // MASTER DATA - IMMUTABLE SHAREHOLDER CONSTANTS
@@ -152,6 +162,9 @@ function App() {
   const [monthlyHistory, setMonthlyHistory] = useState([]);
   const [showAnnualReport, setShowAnnualReport] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showBreakdownModal, setShowBreakdownModal] = useState(false);
+  const [selectedBreakdownData, setSelectedBreakdownData] = useState(null);
+  const [isLoadingFromSupabase, setIsLoadingFromSupabase] = useState(true);
   
   // Modal States for Security Features
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, index: null, monthName: '' });
@@ -188,15 +201,43 @@ function App() {
   // Computed current month string
   const currentMonth = selectedMonth && selectedYear ? `${selectedMonth} ${selectedYear}` : '';
 
-  // Load history from localStorage on mount
+  // Load history from Supabase (or fallback to localStorage for migration) on mount
   useEffect(() => {
-    const saved = localStorage.getItem('vehicleAccountingHistory');
-    if (saved) {
-      try {
-        setMonthlyHistory(JSON.parse(saved));
-      } catch (e) {
-        console.error('Failed to load history:', e);
+    const loadData = async () => {
+      setIsLoadingFromSupabase(true);
+      
+      // Try to load from Supabase first
+      const userId = user?.username || 'default';
+      const supabaseData = await loadMonthlyHistory(userId);
+      
+      if (supabaseData && supabaseData.length > 0) {
+        // Data found in Supabase
+        console.log(`✅ Loaded ${supabaseData.length} records from Supabase`);
+        setMonthlyHistory(supabaseData);
+      } else {
+        // No data in Supabase, check localStorage for migration
+        const saved = localStorage.getItem('vehicleAccountingHistory');
+        if (saved) {
+          try {
+            const localData = JSON.parse(saved);
+            console.log(`📦 Found ${localData.length} records in localStorage, migrating to Supabase...`);
+            setMonthlyHistory(localData);
+            
+            // Migrate to Supabase
+            if (localData.length > 0) {
+              await migrateFromLocalStorage(userId);
+            }
+          } catch (e) {
+            console.error('Failed to load history:', e);
+          }
+        }
       }
+      
+      setIsLoadingFromSupabase(false);
+    };
+
+    if (user) {
+      loadData();
     }
     
     // Set current month and year to Ethiopian calendar equivalent
@@ -226,7 +267,7 @@ function App() {
     
     setSelectedMonth(MONTHS[ethiopianMonthIndex].value);
     setSelectedYear(ethiopianYear.toString());
-  }, []);
+  }, [user]);
 
   // Load pending deletions and clean up expired ones (> 3 days)
   useEffect(() => {
@@ -535,7 +576,7 @@ function App() {
   /**
    * Save current month's calculations and carry forward net balances
    */
-  const handleSaveMonth = () => {
+  const handleSaveMonth = async () => {
     if (!selectedMonth || !selectedYear) {
       alert('Please select both month and year');
       return;
@@ -565,7 +606,20 @@ function App() {
 
     const newHistory = [monthData, ...monthlyHistory];
     setMonthlyHistory(newHistory);
+    
+    // Save to both localStorage (for backup) and Supabase (for sync)
     localStorage.setItem('vehicleAccountingHistory', JSON.stringify(newHistory));
+    
+    // Save to Supabase for cloud sync
+    const userId = user?.username || 'default';
+    const result = await saveMonthlyHistory(newHistory, userId);
+    
+    if (result.success) {
+      console.log('✅ Saved to Supabase successfully');
+    } else {
+      console.error('❌ Failed to save to Supabase:', result.error);
+      alert('Warning: Data saved locally but failed to sync to cloud. Please check your internet connection.');
+    }
 
     // Carry forward net payouts to next month's previous balances
     setAmsaluPrevBalance(calculations.amsalu.netPayout.toString());
@@ -603,7 +657,7 @@ function App() {
       setSelectedMonth(MONTHS[currentMonthIndex + 1].value);
     }
 
-    alert('Month saved successfully! Balances carried forward to next month.');
+    alert('Month saved successfully! Balances carried forward to next month. Data synced to cloud.');
   };
 
   /**
@@ -611,6 +665,14 @@ function App() {
    */
   const handlePrint = () => {
     window.print();
+  };
+
+  /**
+   * Show detailed breakdown for a specific month
+   */
+  const handleShowBreakdown = (record) => {
+    setSelectedBreakdownData(record);
+    setShowBreakdownModal(true);
   };
 
   /**
@@ -2174,7 +2236,17 @@ function App() {
 
                       {/* Actions */}
                       <td className="px-4 py-3 border border-gray-300 text-center no-print">
-                        <div className="flex gap-2 justify-center">
+                        <div className="flex gap-2 justify-center flex-wrap">
+                          {/* Show Breakdown Button - Available to ALL users */}
+                          <button
+                            onClick={() => handleShowBreakdown(record)}
+                            className="px-2 py-1 bg-indigo-500 text-white text-xs rounded hover:bg-indigo-600 transition-colors font-semibold flex items-center gap-1"
+                            title={renderLabel('Show detailed breakdown', 'ዝርዝር ሂሳብ አሳይ')}
+                          >
+                            <Eye size={12} />
+                            {renderLabel('Details', 'ዝርዝር')}
+                          </button>
+                          
                           {/* Edit Button - Admin Only */}
                           {hasPermission('canEdit') && (
                             <button
@@ -2389,6 +2461,251 @@ function App() {
           totalRecords={clearHistoryModal.totalRecords}
           language={language}
         />
+
+        {/* Breakdown Modal - Show detailed financial breakdown for a specific month */}
+        {showBreakdownModal && selectedBreakdownData && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 no-print">
+            <div className="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-indigo-50 to-blue-50 sticky top-0 z-10">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <Calculator className="text-indigo-600" size={32} />
+                    <div>
+                      <h2 className="text-2xl font-bold text-gray-800">
+                        {renderLabel('Financial Breakdown', 'የገንዘብ ዝርዝር')}
+                      </h2>
+                      <p className="text-sm text-gray-600">
+                        {selectedBreakdownData.month} - {new Date(selectedBreakdownData.date).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric',
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowBreakdownModal(false)}
+                    className="text-gray-500 hover:text-gray-700 transition-colors"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-6">
+                {/* Income Section */}
+                <div className="bg-green-50 border-2 border-green-200 rounded-lg p-4">
+                  <h3 className="text-lg font-bold text-green-800 mb-3 flex items-center gap-2">
+                    <span className="text-2xl">📈</span>
+                    {renderLabel('Income', 'ገቢ')}
+                  </h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-gray-600">{renderLabel('Gross Income', 'ጠቅላላ ገቢ')}</p>
+                      <p className="text-xl font-bold text-green-700">{formatCurrency(selectedBreakdownData.inputs.grossIncome)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600">{renderLabel('Overtime Income', 'ኦቨርታይም ገቢ')}</p>
+                      <p className="text-xl font-bold text-green-700">{formatCurrency(selectedBreakdownData.inputs.overtimeIncome || 0)}</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {renderLabel('50% Owner, 35% Driver, 15% Assistant', '50% ባለቤት፣ 35% ሾፌር፣ 15% እረዳት')}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expenses Section */}
+                <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4">
+                  <h3 className="text-lg font-bold text-red-800 mb-3 flex items-center gap-2">
+                    <span className="text-2xl">📉</span>
+                    {renderLabel('Expenses', 'ወጪዎች')}
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div>
+                      <p className="text-sm text-gray-600">{renderLabel('Bank Loan', 'የባንክ እዳ')}</p>
+                      <p className="text-lg font-bold text-red-700">{formatCurrency(selectedBreakdownData.inputs.bankInstallment)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600">{renderLabel('Misc Expenses', 'የተለያዩ ወጪዎች')}</p>
+                      <p className="text-lg font-bold text-red-700">{formatCurrency(selectedBreakdownData.inputs.miscExpenses)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600">{renderLabel('Insurance', 'ኢንሹራንስ')}</p>
+                      <p className="text-lg font-bold text-red-700">{formatCurrency(selectedBreakdownData.inputs.insurancePayment || 0)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600">{renderLabel('Amsalu Salary', 'የአምሳሉ ደመወዝ')}</p>
+                      <p className="text-lg font-bold text-red-700">{formatCurrency(selectedBreakdownData.inputs.amsaluSalary)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600">{renderLabel('Smeneh Salary', 'የስመኔህ ደመወዝ')}</p>
+                      <p className="text-lg font-bold text-red-700">{formatCurrency(selectedBreakdownData.inputs.smenehSalary)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600">{renderLabel('Out-of-Pocket', 'ከኪስ ወጪ')}</p>
+                      <p className="text-lg font-bold text-red-700">{formatCurrency(selectedBreakdownData.inputs.kesOutOfPocket || 0)}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-red-300">
+                    <p className="text-sm text-gray-700">{renderLabel('Total Expenses', 'ጠቅላላ ወጪዎች')}</p>
+                    <p className="text-2xl font-bold text-red-800">
+                      {formatCurrency(
+                        selectedBreakdownData.inputs.bankInstallment + 
+                        selectedBreakdownData.inputs.miscExpenses + 
+                        (selectedBreakdownData.inputs.insurancePayment || 0) +
+                        selectedBreakdownData.inputs.amsaluSalary +
+                        selectedBreakdownData.inputs.smenehSalary +
+                        (selectedBreakdownData.inputs.kesOutOfPocket || 0)
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Shareholders Net Payouts */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
+                    <span className="text-2xl">💰</span>
+                    {renderLabel('Net Payouts per Shareholder', 'የእያንዳንዱ ባለአክሲዮን ንጹህ ክፍያ')}
+                  </h3>
+
+                  {/* Amsalu */}
+                  <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <div>
+                        <h4 className="font-bold text-gray-800">{SHAREHOLDERS.amsalu.name} ({SHAREHOLDERS.amsalu.nameAm})</h4>
+                        <p className="text-sm text-gray-600">{renderLabel(SHAREHOLDERS.amsalu.role, SHAREHOLDERS.amsalu.roleAm)} - {SHAREHOLDERS.amsalu.sharePercent}%</p>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-2xl font-bold ${selectedBreakdownData.results.amsalu.netPayout >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {formatCurrency(selectedBreakdownData.results.amsalu.netPayout)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Gross Share', 'ጠቅላላ ድርሻ')}</p>
+                        <p className="font-semibold text-green-600">+{formatCurrency(selectedBreakdownData.results.amsalu.grossShare)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Salary Received', 'የተቀበለው ደመወዝ')}</p>
+                        <p className="font-semibold text-green-600">+{formatCurrency(selectedBreakdownData.results.amsalu.salary)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Overtime', 'ኦቨርታይም')}</p>
+                        <p className="font-semibold text-green-600">+{formatCurrency(selectedBreakdownData.results.amsalu.overtimeShare || 0)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Salary Share', 'የደመወዝ ድርሻ')}</p>
+                        <p className="font-semibold text-red-600">-{formatCurrency(selectedBreakdownData.results.amsalu.salaryShare)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Equb', 'እቁብ')}</p>
+                        <p className="font-semibold text-red-600">-{formatCurrency(selectedBreakdownData.results.amsalu.equb)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Bank Share', 'የባንክ ድርሻ')}</p>
+                        <p className="font-semibold text-red-600">-{formatCurrency(selectedBreakdownData.results.amsalu.bankShare)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Smeneh */}
+                  <div className="bg-purple-50 border-2 border-purple-200 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <div>
+                        <h4 className="font-bold text-gray-800">{SHAREHOLDERS.smeneh.name} ({SHAREHOLDERS.smeneh.nameAm})</h4>
+                        <p className="text-sm text-gray-600">{renderLabel(SHAREHOLDERS.smeneh.role, SHAREHOLDERS.smeneh.roleAm)} - {SHAREHOLDERS.smeneh.sharePercent}%</p>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-2xl font-bold ${selectedBreakdownData.results.smeneh.netPayout >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {formatCurrency(selectedBreakdownData.results.smeneh.netPayout)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Gross Share', 'ጠቅላላ ድርሻ')}</p>
+                        <p className="font-semibold text-green-600">+{formatCurrency(selectedBreakdownData.results.smeneh.grossShare)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Salary Received', 'የተቀበለው ደመወዝ')}</p>
+                        <p className="font-semibold text-green-600">+{formatCurrency(selectedBreakdownData.results.smeneh.salary)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Overtime', 'ኦቨርታይም')}</p>
+                        <p className="font-semibold text-green-600">+{formatCurrency(selectedBreakdownData.results.smeneh.overtimeShare || 0)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Salary Share', 'የደመወዝ ድርሻ')}</p>
+                        <p className="font-semibold text-red-600">-{formatCurrency(selectedBreakdownData.results.smeneh.salaryShare)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Equb', 'እቁብ')}</p>
+                        <p className="font-semibold text-red-600">-{formatCurrency(selectedBreakdownData.results.smeneh.equb)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Bank Share', 'የባንክ ድርሻ')}</p>
+                        <p className="font-semibold text-red-600">-{formatCurrency(selectedBreakdownData.results.smeneh.bankShare)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Kes Yeshalem */}
+                  <div className="bg-green-50 border-2 border-green-200 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <div>
+                        <h4 className="font-bold text-gray-800">{SHAREHOLDERS.kesYeshalem.name} ({SHAREHOLDERS.kesYeshalem.nameAm})</h4>
+                        <p className="text-sm text-gray-600">{renderLabel(SHAREHOLDERS.kesYeshalem.role, SHAREHOLDERS.kesYeshalem.roleAm)} - {SHAREHOLDERS.kesYeshalem.sharePercent}%</p>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-2xl font-bold ${selectedBreakdownData.results.kesYeshalem.netPayout >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {formatCurrency(selectedBreakdownData.results.kesYeshalem.netPayout)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Gross Share', 'ጠቅላላ ድርሻ')}</p>
+                        <p className="font-semibold text-green-600">+{formatCurrency(selectedBreakdownData.results.kesYeshalem.grossShare)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Overtime', 'ኦቨርታይም')}</p>
+                        <p className="font-semibold text-green-600">+{formatCurrency(selectedBreakdownData.results.kesYeshalem.overtimeShare || 0)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Out-of-Pocket Reimb.', 'ማካካሻ')}</p>
+                        <p className="font-semibold text-green-600">+{formatCurrency(selectedBreakdownData.results.kesYeshalem.outOfPocketReimbursement || 0)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Salary Share', 'የደመወዝ ድርሻ')}</p>
+                        <p className="font-semibold text-red-600">-{formatCurrency(selectedBreakdownData.results.kesYeshalem.salaryShare)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Bank Share', 'የባንክ ድርሻ')}</p>
+                        <p className="font-semibold text-red-600">-{formatCurrency(selectedBreakdownData.results.kesYeshalem.bankShare)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">{renderLabel('Misc Expenses', 'የተለያዩ ወጪዎች')}</p>
+                        <p className="font-semibold text-red-600">-{formatCurrency(selectedBreakdownData.results.kesYeshalem.miscShare)}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Close Button */}
+                <div className="flex justify-center pt-4">
+                  <button
+                    onClick={() => setShowBreakdownModal(false)}
+                    className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-semibold flex items-center gap-2"
+                  >
+                    <X size={20} />
+                    {renderLabel('Close', 'ዝጋ')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Recycle Bin Modal */}
         {showRecycleBin && hasPermission('canDelete') && (
