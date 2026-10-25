@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, FileText, Calculator, Info, History, Printer, Trash2, Edit, MessageSquare, RotateCcw, Shield, LogOut, AlertTriangle, Trash } from 'lucide-react';
+import { Save, FileText, Calculator, Info, History, Printer, Trash2, Edit, MessageSquare, RotateCcw, Shield, LogOut, AlertTriangle, Trash, User } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import LoginPage from './LoginPage';
 import { ReasonModal, CommentModal, EditMonthModal, ClearHistoryModal } from './Modals';
@@ -1107,12 +1107,15 @@ function App() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-            {/* General Vehicle Financials */}
-            <div className="space-y-4">
-              <h3 className="font-semibold text-gray-700 border-b pb-2">
+          {/* General Vehicle Financials - Full Width Section */}
+          <div className="mb-6">
+            <div className="bg-gradient-to-r from-indigo-50 to-blue-50 rounded-lg p-6 border-2 border-indigo-200">
+              <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <Calculator className="text-indigo-600" size={24} />
                 {renderLabel('General Financials', 'አጠቃላይ ፋይናንስ')}
               </h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1124,6 +1127,7 @@ function App() {
                   onChange={(e) => setGrossIncome(e.target.value.replace(/,/g, ''))}
                   className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
+                  disabled={!hasPermission('canEdit')}
                 />
               </div>
 
@@ -1137,6 +1141,7 @@ function App() {
                   onChange={(e) => setOvertimeIncome(e.target.value.replace(/,/g, ''))}
                   className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-green-50"
                   placeholder="0.00"
+                  disabled={!hasPermission('canEdit')}
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   {renderLabel('50% to Owner, 50% split 70/30 Driver/Assistant', '50% ለባለቤት፣ 50% 70/30 ለሾፌር/እረዳት')}
@@ -1153,6 +1158,7 @@ function App() {
                   onChange={(e) => setBankInstallment(e.target.value.replace(/,/g, ''))}
                   className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
+                  disabled={!hasPermission('canEdit')}
                 />
               </div>
 
@@ -1166,6 +1172,7 @@ function App() {
                   onChange={(e) => setMiscExpenses(e.target.value.replace(/,/g, ''))}
                   className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   placeholder="0.00"
+                  disabled={!hasPermission('canEdit')}
                 />
               </div>
 
@@ -1179,16 +1186,22 @@ function App() {
                   onChange={(e) => setInsurancePayment(e.target.value.replace(/,/g, ''))}
                   className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-purple-50"
                   placeholder="0.00"
+                  disabled={!hasPermission('canEdit')}
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   {renderLabel('Shared by all shareholders by percentage', 'በሁሉም ባለአክሲዮኖች በመቶኛ ይጋራል')}
                 </p>
               </div>
+              </div>
             </div>
+          </div>
 
+          {/* Three Shareholders Section - Side by Side Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Kes Yeshalem Section */}
-            <div className="space-y-4">
-              <h3 className="font-semibold text-gray-700 border-b pb-2">
+            <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-5 border-2 border-green-200 space-y-4">
+              <h3 className="text-lg font-bold text-gray-800 border-b-2 border-green-300 pb-2 flex items-center gap-2">
+                <Shield className="text-green-600" size={20} />
                 {renderLabel(`${SHAREHOLDERS.kesYeshalem.name} (${SHAREHOLDERS.kesYeshalem.role})`, `${SHAREHOLDERS.kesYeshalem.nameAm} (${SHAREHOLDERS.kesYeshalem.roleAm})`)}
               </h3>
 
@@ -1200,15 +1213,23 @@ function App() {
                   type="text"
                   value={formatNumberInput(kesYeshalemPrevBalance)}
                   onChange={(e) => setKesYeshalemPrevBalance(e.target.value.replace(/,/g, ''))}
-                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                   placeholder="0.00"
+                  disabled={!hasPermission('canEdit')}
                 />
+              </div>
+              
+              <div className="pt-3 border-t border-green-200">
+                <p className="text-xs text-gray-600 font-semibold">
+                  {renderLabel('Equity Share', 'የአክሲዮን ድርሻ')}: {SHAREHOLDERS.kesYeshalem.sharePercent}%
+                </p>
               </div>
             </div>
 
             {/* Smeneh Section */}
-            <div className="space-y-4">
-              <h3 className="font-semibold text-gray-700 border-b pb-2">
+            <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg p-5 border-2 border-purple-200 space-y-4">
+              <h3 className="text-lg font-bold text-gray-800 border-b-2 border-purple-300 pb-2 flex items-center gap-2">
+                <User className="text-purple-600" size={20} />
                 {renderLabel(`${SHAREHOLDERS.smeneh.name} (${SHAREHOLDERS.smeneh.role})`, `${SHAREHOLDERS.smeneh.nameAm} (${SHAREHOLDERS.smeneh.roleAm})`)}
               </h3>
 
@@ -1220,8 +1241,9 @@ function App() {
                   type="text"
                   value={formatNumberInput(smenehSalary)}
                   onChange={(e) => setSmenehSalary(e.target.value.replace(/,/g, ''))}
-                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                   placeholder="0.00"
+                  disabled={!hasPermission('canEdit')}
                 />
               </div>
 
@@ -1233,8 +1255,9 @@ function App() {
                   type="text"
                   value={formatNumberInput(smenehEqub)}
                   onChange={(e) => setSmenehEqub(e.target.value.replace(/,/g, ''))}
-                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                   placeholder="0.00"
+                  disabled={!hasPermission('canEdit')}
                 />
               </div>
 
@@ -1246,15 +1269,23 @@ function App() {
                   type="text"
                   value={formatNumberInput(smenehPrevBalance)}
                   onChange={(e) => setSmenehPrevBalance(e.target.value.replace(/,/g, ''))}
-                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                   placeholder="0.00"
+                  disabled={!hasPermission('canEdit')}
                 />
+              </div>
+              
+              <div className="pt-3 border-t border-purple-200">
+                <p className="text-xs text-gray-600 font-semibold">
+                  {renderLabel('Equity Share', 'የአክሲዮን ድርሻ')}: {SHAREHOLDERS.smeneh.sharePercent}%
+                </p>
               </div>
             </div>
 
             {/* Amsalu Section */}
-            <div className="space-y-4">
-              <h3 className="font-semibold text-gray-700 border-b pb-2">
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-5 border-2 border-blue-200 space-y-4">
+              <h3 className="text-lg font-bold text-gray-800 border-b-2 border-blue-300 pb-2 flex items-center gap-2">
+                <User className="text-blue-600" size={20} />
                 {renderLabel(`${SHAREHOLDERS.amsalu.name} (${SHAREHOLDERS.amsalu.role})`, `${SHAREHOLDERS.amsalu.nameAm} (${SHAREHOLDERS.amsalu.roleAm})`)}
               </h3>
 
@@ -1266,8 +1297,9 @@ function App() {
                   type="text"
                   value={formatNumberInput(amsaluSalary)}
                   onChange={(e) => setAmsaluSalary(e.target.value.replace(/,/g, ''))}
-                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="0.00"
+                  disabled={!hasPermission('canEdit')}
                 />
               </div>
 
@@ -1279,8 +1311,9 @@ function App() {
                   type="text"
                   value={formatNumberInput(amsaluEqub)}
                   onChange={(e) => setAmsaluEqub(e.target.value.replace(/,/g, ''))}
-                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="0.00"
+                  disabled={!hasPermission('canEdit')}
                 />
               </div>
 
@@ -1292,9 +1325,16 @@ function App() {
                   type="text"
                   value={formatNumberInput(amsaluPrevBalance)}
                   onChange={(e) => setAmsaluPrevBalance(e.target.value.replace(/,/g, ''))}
-                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="0.00"
+                  disabled={!hasPermission('canEdit')}
                 />
+              </div>
+              
+              <div className="pt-3 border-t border-blue-200">
+                <p className="text-xs text-gray-600 font-semibold">
+                  {renderLabel('Equity Share', 'የአክሲዮን ድርሻ')}: {SHAREHOLDERS.amsalu.sharePercent}%
+                </p>
               </div>
             </div>
           </div>
