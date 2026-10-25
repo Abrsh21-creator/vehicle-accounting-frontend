@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, AlertTriangle, Edit, MessageSquare, Trash2 } from 'lucide-react';
+import { X, AlertTriangle, Edit, MessageSquare, Trash2, Trash } from 'lucide-react';
 
 // Reason Modal for Delete/Edit actions
 export const ReasonModal = ({ isOpen, onClose, onConfirm, action, monthName, language }) => {
@@ -395,6 +395,147 @@ export const EditMonthModal = ({ isOpen, onClose, onSave, monthData, language })
               <>
                 <Edit size={18} />
                 {renderLabel('Save Changes', 'ለውጦችን አስቀምጥ')}
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+// Clear All History Modal
+export const ClearHistoryModal = ({ isOpen, onClose, onConfirm, totalRecords, language }) => {
+  const [reason, setReason] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const renderLabel = (en, am) => {
+    if (language === 'english') return en;
+    if (language === 'amharic') return am;
+    return `${am} / ${en}`;
+  };
+
+  const handleSubmit = async () => {
+    if (!reason.trim()) {
+      alert(renderLabel('Please enter a reason', 'እባክዎ ምክንያት ያስገቡ'));
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await onConfirm(reason.trim());
+      setReason('');
+      onClose();
+    } catch (error) {
+      alert(renderLabel('Failed to clear history', 'ታሪክን ማጽዳት አልተቻለም'));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 no-print">
+      <div className="bg-white rounded-lg max-w-lg w-full shadow-2xl">
+        {/* Header */}
+        <div className="p-6 border-b border-gray-200 bg-red-50">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-red-100 rounded-full">
+                <Trash className="text-red-600" size={24} />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-gray-800">
+                  {renderLabel('Clear All History', 'ሁሉንም ታሪክ ያጽዱ')}
+                </h2>
+                <p className="text-sm text-gray-600">
+                  {renderLabel(`${totalRecords} records`, `${totalRecords} መዝገቦች`)}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+              disabled={isSubmitting}
+            >
+              <X size={24} />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-6">
+          {/* Warning Message */}
+          <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start gap-3">
+            <AlertTriangle className="text-yellow-600 flex-shrink-0 mt-0.5" size={20} />
+            <div className="text-sm text-yellow-800">
+              <p className="font-semibold mb-1">
+                {renderLabel('Recycle Bin Protection', 'የቆሻሻ መጣያ ጥበቃ')}
+              </p>
+              <p>
+                {renderLabel(
+                  'All records will be moved to the Recycle Bin and can be recovered within 3 days. After that, they will be permanently deleted.',
+                  'ሁሉም መዝገቦች ወደ ቆሻሻ መጣያ ይንቀሳቀሳሉ እና በ3 ቀናት ውስጥ ሊመለሱ ይችላሉ። ከዚያ በኋላ ለዘለዓለም ይሰረዛሉ።'
+                )}
+              </p>
+            </div>
+          </div>
+
+          {/* Reason Input */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              {renderLabel(
+                'Reason for Clearing All History (Required)',
+                'ሁሉንም ታሪክ የማጽዳት ምክንያት (አስፈላጊ)'
+              )}
+              <span className="text-red-500 ml-1">*</span>
+            </label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+              rows="4"
+              placeholder={renderLabel(
+                'Enter detailed reason for clearing all history...',
+                'ሁሉንም ታሪክ ለማጽዳት ዝርዝር ምክንያት ያስገቡ...'
+              )}
+              disabled={isSubmitting}
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              {renderLabel(
+                'This reason will be recorded in the audit log',
+                'ይህ ምክንያት በኦዲት ምዝግብ ውስጥ ይመዘገባል'
+              )}
+            </p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-6 border-t border-gray-200 bg-gray-50 flex gap-3 justify-end">
+          <button
+            onClick={onClose}
+            className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium"
+            disabled={isSubmitting}
+          >
+            {renderLabel('Cancel', 'ተወው')}
+          </button>
+          <button
+            onClick={handleSubmit}
+            className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={isSubmitting || !reason.trim()}
+          >
+            {isSubmitting ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                {renderLabel('Processing...', 'በሂደት ላይ...')}
+              </>
+            ) : (
+              <>
+                <Trash size={18} />
+                {renderLabel('Clear All History', 'ሁሉንም ታሪክ ያጽዱ')}
               </>
             )}
           </button>

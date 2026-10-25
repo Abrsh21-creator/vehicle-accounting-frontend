@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Save, FileText, Calculator, Info, History, Printer, Trash2, Edit, MessageSquare, RotateCcw, Shield, LogOut, AlertTriangle } from 'lucide-react';
+import { Save, FileText, Calculator, Info, History, Printer, Trash2, Edit, MessageSquare, RotateCcw, Shield, LogOut, AlertTriangle, Trash } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import LoginPage from './LoginPage';
-import { ReasonModal, CommentModal, EditMonthModal } from './Modals';
+import { ReasonModal, CommentModal, EditMonthModal, ClearHistoryModal } from './Modals';
 import { createAuditLog, saveAuditLog, AUDIT_ACTIONS } from './AuditLog';
 
 // ============================================================================
@@ -152,7 +152,10 @@ function App() {
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, index: null, monthName: '' });
   const [editModal, setEditModal] = useState({ isOpen: false, data: null, index: null });
   const [commentModal, setCommentModal] = useState({ isOpen: false, index: null, monthName: '', comment: '' });
+  const [clearHistoryModal, setClearHistoryModal] = useState({ isOpen: false, totalRecords: 0 });
   const [pendingDeletions, setPendingDeletions] = useState([]);
+  const [recycleBin, setRecycleBin] = useState([]);
+  const [showRecycleBin, setShowRecycleBin] = useState(false);
   
   // Ethiopian Calendar Months (13 months)
   const MONTHS = [
@@ -252,6 +255,39 @@ function App() {
         localStorage.setItem('pendingDeletions', JSON.stringify(valid));
       } catch (e) {
         console.error('Failed to load pending deletions:', e);
+      }
+    }
+
+    // Load and clean recycle bin
+    const savedBin = localStorage.getItem('recycleBin');
+    if (savedBin) {
+      try {
+        const bin = JSON.parse(savedBin);
+        const now = Date.now();
+        const valid = bin.filter(item => {
+          const ageInDays = (now - item.deletedAt) / (1000 * 60 * 60 * 24);
+          return ageInDays < 3;
+        });
+        
+        // Log permanent deletions
+        const expired = bin.filter(item => {
+          const ageInDays = (now - item.deletedAt) / (1000 * 60 * 60 * 24);
+          return ageInDays >= 3;
+        });
+        
+        expired.forEach(item => {
+          const log = createAuditLog(
+            AUDIT_ACTIONS.PERMANENT_DELETE,
+            { monthName: item.month, deletionReason: item.deletionReason },
+            user
+          );
+          saveAuditLog(log);
+        });
+        
+        setRecycleBin(valid);
+        localStorage.setItem('recycleBin', JSON.stringify(valid));
+      } catch (e) {
+        console.error('Failed to load recycle bin:', e);
       }
     }
   }, [user]);
@@ -627,6 +663,92 @@ function App() {
   };
 
   /**
+   * Restore a record from recycle bin
+   */
+  const handleRestoreFromRecycleBin = (index) => {
+    const record = recycleBin[index];
+    
+    // Remove from recycle bin
+    const newBin = recycleBin.filter((_, idx) => idx !== index);
+    setRecycleBin(newBin);
+    localStorage.setItem('recycleBin', JSON.stringify(newBin));
+    
+    // Add back to history
+    const restoredRecord = { ...record };
+    delete restoredRecord.deletedAt;
+    delete restoredRecord.deletionReason;
+    delete restoredRecord.deletedBy;
+    delete restoredRecord.deletionType;
+    
+    const newHistory = [restoredRecord, ...monthlyHistory];
+    setMonthlyHistory(newHistory);
+    localStorage.setItem('vehicleAccountingHistory', JSON.stringify(newHistory));
+    
+    // Log the restoration
+    const log = createAuditLog(
+      AUDIT_ACTIONS.RESTORE_MONTH,
+      { monthName: record.month, source: 'recycle_bin' },
+      user
+    );
+    saveAuditLog(log);
+    
+    alert(renderLabel('Record restored successfully', 'መዝገብ በተሳካ ሁኔታ ተመልሷል'));
+  };
+
+  /**
+   * Permanently delete a record from recycle bin
+   */
+  const handlePermanentDelete = (index) => {
+    if (!window.confirm(renderLabel(
+      'Permanently delete this record? This action cannot be undone!',
+      'ይህን መዝገብ ለዘለዓለም ይሰርዙ? ይህ ድርጊት መልሰው ማግኘት አይችሉም!'
+    ))) return;
+    
+    const record = recycleBin[index];
+    
+    // Remove from recycle bin
+    const newBin = recycleBin.filter((_, idx) => idx !== index);
+    setRecycleBin(newBin);
+    localStorage.setItem('recycleBin', JSON.stringify(newBin));
+    
+    // Log permanent deletion
+    const log = createAuditLog(
+      AUDIT_ACTIONS.PERMANENT_DELETE,
+      { monthName: record.month, deletionReason: record.deletionReason },
+      user
+    );
+    saveAuditLog(log);
+    
+    alert(renderLabel('Record permanently deleted', 'መዝገብ ለዘለዓለም ተሰርዟል'));
+  };
+
+  /**
+   * Empty entire recycle bin
+   */
+  const handleEmptyRecycleBin = () => {
+    if (!window.confirm(renderLabel(
+      `Permanently delete all ${recycleBin.length} records? This action cannot be undone!`,
+      `ሁሉንም ${recycleBin.length} መዝገቦች ለዘለዓለም ይሰርዙ? ይህ ድርጊት መልሰው ማግኘት አይችሉም!`
+    ))) return;
+    
+    // Log each permanent deletion
+    recycleBin.forEach(record => {
+      const log = createAuditLog(
+        AUDIT_ACTIONS.PERMANENT_DELETE,
+        { monthName: record.month, deletionReason: record.deletionReason, source: 'empty_bin' },
+        user
+      );
+      saveAuditLog(log);
+    });
+    
+    // Clear recycle bin
+    setRecycleBin([]);
+    localStorage.removeItem('recycleBin');
+    
+    alert(renderLabel('Recycle bin emptied', 'ቆሻሻ መጣያ ባዶ ሆኗል'));
+  };
+
+  /**
    * Initiate edit with modal
    */
   const handleEditMonth = (index) => {
@@ -719,14 +841,51 @@ function App() {
   };
 
   /**
-   * Clear all history
+   * Initiate clear all history with reason modal (Admin only)
    */
   const handleClearAllHistory = () => {
-    if (window.confirm('Are you sure you want to delete ALL history? This action cannot be undone.')) {
-      setMonthlyHistory([]);
-      localStorage.removeItem('vehicleAccountingHistory');
-      alert('All history cleared successfully.');
-    }
+    setClearHistoryModal({
+      isOpen: true,
+      totalRecords: monthlyHistory.length,
+    });
+  };
+
+  /**
+   * Confirm clear all history and move to recycle bin
+   */
+  const confirmClearAllHistory = (reason) => {
+    if (!monthlyHistory.length) return;
+    
+    // Move all records to recycle bin
+    const deletedRecords = monthlyHistory.map(record => ({
+      ...record,
+      deletedAt: Date.now(),
+      deletionReason: reason,
+      deletedBy: user.username,
+      deletionType: 'CLEAR_ALL',
+    }));
+    
+    const newRecycleBin = [...recycleBin, ...deletedRecords];
+    setRecycleBin(newRecycleBin);
+    localStorage.setItem('recycleBin', JSON.stringify(newRecycleBin));
+    
+    // Clear active history
+    setMonthlyHistory([]);
+    localStorage.setItem('vehicleAccountingHistory', JSON.stringify([]));
+    
+    // Log the action
+    const log = createAuditLog(
+      AUDIT_ACTIONS.CLEAR_HISTORY,
+      { reason, recordsCount: monthlyHistory.length },
+      user
+    );
+    saveAuditLog(log);
+    
+    setClearHistoryModal({ isOpen: false, totalRecords: 0 });
+    alert(renderLabel(
+      `${monthlyHistory.length} records moved to Recycle Bin. You can restore them within 3 days.`,
+      `${monthlyHistory.length} መዝገቦች ወደ ቆሻሻ መጣያ ተንቀሳቅሰዋል። በ3 ቀናት ውስጥ መመለስ ይችላሉ።`
+    ));
   };
 
   // ============================================================================
@@ -797,6 +956,18 @@ function App() {
                   <History size={18} />
                   {renderLabel('History', 'ታሪክ')}
                 </button>
+                {hasPermission('canDelete') && recycleBin.length > 0 && (
+                  <button
+                    onClick={() => setShowRecycleBin(!showRecycleBin)}
+                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors flex items-center gap-2 relative"
+                  >
+                    <Trash size={18} />
+                    {renderLabel('Recycle Bin', 'ቆሻሻ መጣያ')}
+                    <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-bold">
+                      {recycleBin.length}
+                    </span>
+                  </button>
+                )}
                 <button
                   onClick={handlePrint}
                   className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
@@ -1448,11 +1619,12 @@ function App() {
                 {renderLabel('Monthly History Archive', 'የወርሃዊ ታሪክ ማህደር')}
               </h2>
             </div>
-            {monthlyHistory.length > 0 && (
+            {monthlyHistory.length > 0 && hasPermission('canDelete') && (
               <button
                 onClick={handleClearAllHistory}
-                className="no-print px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-semibold"
+                className="no-print px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-semibold flex items-center gap-2"
               >
+                <Trash2 size={16} />
                 {renderLabel('Clear All History', 'ሁሉንም ታሪክ ያጽዱ')}
               </button>
             )}
@@ -1493,6 +1665,9 @@ function App() {
                     </th>
                     <th className="px-4 py-3 text-right text-sm font-semibold border border-indigo-700 bg-green-700">
                       {renderLabel('Kes Yeshalem Net', 'ቄስ የሻለም ንጹህ')}
+                    </th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold border border-indigo-700 bg-yellow-600">
+                      {renderLabel('Comment / Notes', 'አስተያየት / ማስታወሻ')}
                     </th>
                     <th className="px-4 py-3 text-center text-sm font-semibold border border-indigo-700 no-print">
                       {renderLabel('Actions', 'ድርጊቶች')}
@@ -1548,6 +1723,29 @@ function App() {
                         record.results.kesYeshalem.netPayout >= 0 ? 'text-green-600' : 'text-red-600'
                       }`}>
                         {formatCurrency(record.results.kesYeshalem.netPayout)}
+                      </td>
+
+                      {/* Comment/Notes Column - Visible to ALL users */}
+                      <td className="px-4 py-3 border border-gray-300 text-left">
+                        {record.comment ? (
+                          <div className="flex items-start gap-2">
+                            <MessageSquare size={14} className="text-yellow-600 flex-shrink-0 mt-0.5" />
+                            <div className="text-sm text-gray-700 break-words">
+                              <p className="line-clamp-2 hover:line-clamp-none transition-all">
+                                {record.comment}
+                              </p>
+                              {record.commentedBy && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                  - {record.commentedBy}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400 italic">
+                            {renderLabel('No comment', 'ምንም አስተያየት የለም')}
+                          </span>
+                        )}
                       </td>
 
                       {/* Actions */}
@@ -1624,6 +1822,9 @@ function App() {
                       {formatCurrency(
                         monthlyHistory.reduce((sum, r) => sum + r.results.kesYeshalem.netPayout, 0)
                       )}
+                    </td>
+                    <td className="px-4 py-3 border border-gray-600 text-center text-xs">
+                      {renderLabel('---', '---')}
                     </td>
                     <td className="px-4 py-3 border border-gray-600 no-print"></td>
                   </tr>
@@ -1756,6 +1957,150 @@ function App() {
           monthData={editModal.data}
           language={language}
         />
+
+        <ClearHistoryModal
+          isOpen={clearHistoryModal.isOpen}
+          onClose={() => setClearHistoryModal({ isOpen: false, totalRecords: 0 })}
+          onConfirm={confirmClearAllHistory}
+          totalRecords={clearHistoryModal.totalRecords}
+          language={language}
+        />
+
+        {/* Recycle Bin Modal */}
+        {showRecycleBin && hasPermission('canDelete') && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 no-print">
+            <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6 border-b border-gray-200 bg-orange-50 sticky top-0 z-10">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <Trash className="text-orange-600" size={32} />
+                    <div>
+                      <h2 className="text-2xl font-bold text-gray-800">
+                        {renderLabel('Recycle Bin', 'ቆሻሻ መጣያ')}
+                      </h2>
+                      <p className="text-sm text-gray-600">
+                        {renderLabel(
+                          `${recycleBin.length} deleted records - Auto-cleanup after 3 days`,
+                          `${recycleBin.length} የተሰረዙ መዝገቦች - ከ3 ቀናት በኋላ ራስ-ሰር ይጸዳል`
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowRecycleBin(false)}
+                    className="text-gray-500 hover:text-gray-700 text-2xl"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-6">
+                {recycleBin.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Trash className="mx-auto text-gray-400 mb-4" size={48} />
+                    <p className="text-gray-500 text-lg">
+                      {renderLabel('Recycle bin is empty', 'ቆሻሻ መጣያ ባዶ ነው')}
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="mb-4 flex justify-between items-center">
+                      <p className="text-sm text-gray-600">
+                        {renderLabel(
+                          'Deleted records are kept for 3 days before permanent deletion',
+                          'የተሰረዙ መዝገቦች ከዘለዓለም መሰረዝ በፊት ለ3 ቀናት ይቀመጣሉ'
+                        )}
+                      </p>
+                      <button
+                        onClick={handleEmptyRecycleBin}
+                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-semibold flex items-center gap-2"
+                      >
+                        <Trash2 size={16} />
+                        {renderLabel('Empty Recycle Bin', 'ቆሻሻ መጣያ ባዶ አድርግ')}
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {recycleBin.map((record, index) => {
+                        const hoursLeft = 72 - ((Date.now() - record.deletedAt) / (1000 * 60 * 60));
+                        const daysLeft = Math.floor(hoursLeft / 24);
+                        const hoursLeftInDay = Math.floor(hoursLeft % 24);
+                        
+                        return (
+                          <div key={index} className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                            <div className="flex justify-between items-start">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-3 mb-2">
+                                  <h3 className="font-bold text-lg text-gray-800">{record.month}</h3>
+                                  {record.deletionType === 'CLEAR_ALL' && (
+                                    <span className="px-2 py-1 bg-red-100 text-red-700 text-xs rounded-full font-semibold">
+                                      {renderLabel('Bulk Delete', 'ጅምላ ሰርዝ')}
+                                    </span>
+                                  )}
+                                </div>
+                                
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm mb-3">
+                                  <div>
+                                    <span className="text-gray-600">{renderLabel('Income', 'ገቢ')}:</span>
+                                    <span className="font-semibold ml-2">{formatCurrency(record.inputs.grossIncome)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-600">{renderLabel('Amsalu', 'አምሳሉ')}:</span>
+                                    <span className="font-semibold ml-2">{formatCurrency(record.results.amsalu.netPayout)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-600">{renderLabel('Smeneh', 'ስመኔህ')}:</span>
+                                    <span className="font-semibold ml-2">{formatCurrency(record.results.smeneh.netPayout)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-600">{renderLabel('Kes Y.', 'ቄስ የ.')}:</span>
+                                    <span className="font-semibold ml-2">{formatCurrency(record.results.kesYeshalem.netPayout)}</span>
+                                  </div>
+                                </div>
+
+                                <div className="text-sm text-gray-600 space-y-1">
+                                  <p>
+                                    <span className="font-medium">{renderLabel('Deleted by', 'የሰረዘው')}:</span> {record.deletedBy}
+                                    {' '}<span className="text-gray-400">•</span>{' '}
+                                    <span className="font-medium">{renderLabel('Date', 'ቀን')}:</span> {new Date(record.deletedAt).toLocaleString()}
+                                  </p>
+                                  <p>
+                                    <span className="font-medium">{renderLabel('Reason', 'ምክንያት')}:</span> {record.deletionReason}
+                                  </p>
+                                  <p className="text-red-600 font-semibold">
+                                    ⏰ {renderLabel(`Time left: ${daysLeft}d ${hoursLeftInDay}h`, `የቀረው ጊዜ: ${daysLeft}ቀ ${hoursLeftInDay}ሰ`)}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-col gap-2 ml-4">
+                                <button
+                                  onClick={() => handleRestoreFromRecycleBin(index)}
+                                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold flex items-center gap-2 whitespace-nowrap"
+                                >
+                                  <RotateCcw size={18} />
+                                  {renderLabel('Restore', 'መልስ')}
+                                </button>
+                                <button
+                                  onClick={() => handlePermanentDelete(index)}
+                                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-semibold flex items-center gap-2 whitespace-nowrap"
+                                >
+                                  <Trash2 size={18} />
+                                  {renderLabel('Delete Forever', 'ለዘለዓለም ሰርዝ')}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="mt-8 text-center text-gray-600 text-sm">
