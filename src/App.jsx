@@ -143,6 +143,9 @@ function App() {
   const [smenehPrevBalance, setSmenehPrevBalance] = useState('');
   const [kesYeshalemPrevBalance, setKesYeshalemPrevBalance] = useState('');
   
+  // Kes Yeshalem Out-of-Pocket Expense (Cash Advance)
+  const [kesOutOfPocket, setKesOutOfPocket] = useState('');
+  
   // UI States
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -312,6 +315,7 @@ function App() {
     const bankPayment = safeParseFloat(bankInstallment);
     const misc = safeParseFloat(miscExpenses);
     const insurance = safeParseFloat(insurancePayment); // NEW: Insurance
+    const kesOutOfPocketExpense = safeParseFloat(kesOutOfPocket); // NEW: Kes out-of-pocket expense
     const amsaluSal = safeParseFloat(amsaluSalary);
     const amsaluEq = safeParseFloat(amsaluEqub);
     const smenehSal = safeParseFloat(smenehSalary);
@@ -322,6 +326,16 @@ function App() {
 
     // Total Salaries Pool (shared expense)
     const totalSalaries = amsaluSal + smenehSal;
+    
+    // ========================================================================
+    // KES OUT-OF-POCKET EXPENSE DISTRIBUTION
+    // ========================================================================
+    // When Kes Yeshalem pays an expense out-of-pocket, all shareholders must
+    // reimburse him according to their equity percentages.
+    // Kes gets reimbursed by others, so he receives back what others owe.
+    const kesOutOfPocketKesShare = (kesOutOfPocketExpense * SHAREHOLDERS.kesYeshalem.sharePercent) / 100;
+    const kesOutOfPocketSmenehShare = (kesOutOfPocketExpense * SHAREHOLDERS.smeneh.sharePercent) / 100;
+    const kesOutOfPocketAmsaluShare = (kesOutOfPocketExpense * SHAREHOLDERS.amsalu.sharePercent) / 100;
     
     // ========================================================================
     // OVERTIME INCOME DISTRIBUTION
@@ -367,8 +381,11 @@ function App() {
     // Step 7: Overtime Income Share (NEW)
     const smenehOvertimeIncome = smenehOvertimeShare;
     
-    // FINAL NET PAYOUT (includes overtime and insurance)
-    const smenehNet = smenehGrossShare + smenehSalaryReceived - smenehSalaryShare - smenehEqubDeduction - smenehBankShare - smenehInsuranceShare + smenehPrevBalanceValue + smenehOvertimeIncome;
+    // Step 8: Out-of-Pocket Expense Share (Deduction - reimbursement to Kes)
+    const smenehOutOfPocketDeduction = kesOutOfPocketSmenehShare;
+    
+    // FINAL NET PAYOUT (includes overtime, insurance, and out-of-pocket reimbursement)
+    const smenehNet = smenehGrossShare + smenehSalaryReceived - smenehSalaryShare - smenehEqubDeduction - smenehBankShare - smenehInsuranceShare + smenehPrevBalanceValue + smenehOvertimeIncome - smenehOutOfPocketDeduction;
 
     // ========================================================================
     // AMSALU (15.6% Shareholder / Assistant) - 6 STEPS
@@ -394,8 +411,11 @@ function App() {
     // Step 7: Overtime Income Share (NEW)
     const amsaluOvertimeIncome = amsaluOvertimeShare;
     
-    // FINAL NET PAYOUT (includes overtime and insurance)
-    const amsaluNet = amsaluGrossShare + amsaluSalaryReceived - amsaluSalaryShare - amsaluEqubDeduction - amsaluBankShare - amsaluInsuranceShare + amsaluPrevBalanceValue + amsaluOvertimeIncome;
+    // Step 8: Out-of-Pocket Expense Share (Deduction - reimbursement to Kes)
+    const amsaluOutOfPocketDeduction = kesOutOfPocketAmsaluShare;
+    
+    // FINAL NET PAYOUT (includes overtime, insurance, and out-of-pocket reimbursement)
+    const amsaluNet = amsaluGrossShare + amsaluSalaryReceived - amsaluSalaryShare - amsaluEqubDeduction - amsaluBankShare - amsaluInsuranceShare + amsaluPrevBalanceValue + amsaluOvertimeIncome - amsaluOutOfPocketDeduction;
 
     // ========================================================================
     // KES YESHALEM (71.8% Shareholder / Main Owner) - 5 STEPS
@@ -418,8 +438,13 @@ function App() {
     // Step 6: Overtime Income Share (NEW)
     const kesYeshalemOvertimeIncome = kesYeshalemOvertimeShare;
     
-    // FINAL NET PAYOUT (includes overtime and insurance)
-    const kesYeshalemNet = kesYeshalemGrossShare - kesYeshalemSalaryShare - kesYeshalemBankShare - kesYeshalemMiscShare - kesYeshalemInsuranceShare + kesYeshalemPrevBalanceValue + kesYeshalemOvertimeIncome;
+    // Step 7: Out-of-Pocket Expense Reimbursement (Addition - gets reimbursed by others)
+    // Kes paid the full amount, but only his share is his expense.
+    // He gets reimbursed for what others owe (Smeneh's + Amsalu's shares)
+    const kesOutOfPocketReimbursement = kesOutOfPocketSmenehShare + kesOutOfPocketAmsaluShare;
+    
+    // FINAL NET PAYOUT (includes overtime, insurance, and out-of-pocket reimbursement)
+    const kesYeshalemNet = kesYeshalemGrossShare - kesYeshalemSalaryShare - kesYeshalemBankShare - kesYeshalemMiscShare - kesYeshalemInsuranceShare + kesYeshalemPrevBalanceValue + kesYeshalemOvertimeIncome - kesOutOfPocketKesShare + kesOutOfPocketReimbursement;
 
     // ========================================================================
     // VERIFICATION
@@ -446,6 +471,13 @@ function App() {
         smeneh: smenehInsuranceShare,
         amsalu: amsaluInsuranceShare,
       },
+      kesOutOfPocketExpense: {
+        total: kesOutOfPocketExpense,
+        kesYeshalemShare: kesOutOfPocketKesShare,
+        smenehShare: kesOutOfPocketSmenehShare,
+        amsaluShare: kesOutOfPocketAmsaluShare,
+        reimbursementToKes: kesOutOfPocketReimbursement,
+      },
       amsalu: {
         grossShare: amsaluGrossShare,
         salary: amsaluSal,
@@ -454,6 +486,7 @@ function App() {
         bankShare: amsaluBankShare,
         insuranceShare: amsaluInsuranceShare,
         overtimeShare: amsaluOvertimeIncome,
+        outOfPocketShare: amsaluOutOfPocketDeduction,
         prevBalance: amsaluPrev,
         netPayout: amsaluNet,
       },
@@ -465,6 +498,7 @@ function App() {
         bankShare: smenehBankShare,
         insuranceShare: smenehInsuranceShare,
         overtimeShare: smenehOvertimeIncome,
+        outOfPocketShare: smenehOutOfPocketDeduction,
         prevBalance: smenehPrev,
         netPayout: smenehNet,
       },
@@ -475,6 +509,9 @@ function App() {
         miscShare: kesYeshalemMiscShare,
         insuranceShare: kesYeshalemInsuranceShare,
         overtimeShare: kesYeshalemOvertimeIncome,
+        outOfPocketExpense: kesOutOfPocketExpense,
+        outOfPocketShare: kesOutOfPocketKesShare,
+        outOfPocketReimbursement: kesOutOfPocketReimbursement,
         prevBalance: kesYeshalemPrev,
         netPayout: kesYeshalemNet,
       },
@@ -511,6 +548,7 @@ function App() {
         bankInstallment: safeParseFloat(bankInstallment),
         miscExpenses: safeParseFloat(miscExpenses),
         insurancePayment: safeParseFloat(insurancePayment),
+        kesOutOfPocket: safeParseFloat(kesOutOfPocket),
         amsaluSalary: safeParseFloat(amsaluSalary),
         amsaluEqub: safeParseFloat(amsaluEqub),
         smenehSalary: safeParseFloat(smenehSalary),
@@ -538,6 +576,7 @@ function App() {
     setBankInstallment('');
     setMiscExpenses('');
     setInsurancePayment('');
+    setKesOutOfPocket('');
     setAmsaluSalary('');
     setAmsaluEqub('');
     setSmenehSalary('');
@@ -1217,6 +1256,23 @@ function App() {
                   placeholder="0.00"
                   disabled={!hasPermission('canEdit')}
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {renderLabel('Out-of-Pocket Expense / Cash Advance', 'የካሽ መቅደም / ከኪስ ወጪ')}
+                </label>
+                <input
+                  type="text"
+                  value={formatNumberInput(kesOutOfPocket)}
+                  onChange={(e) => setKesOutOfPocket(e.target.value.replace(/,/g, ''))}
+                  className="w-full px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent bg-yellow-50"
+                  placeholder="0.00"
+                  disabled={!hasPermission('canEdit')}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  {renderLabel('Shared by all shareholders (71.8%, 12.6%, 15.6%)', 'በሁሉም ባለአክሲዮኖች ይጋራል (71.8%, 12.6%, 15.6%)')}
+                </p>
               </div>
               
               <div className="pt-3 border-t border-green-200">
