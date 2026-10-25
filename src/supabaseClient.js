@@ -3,16 +3,28 @@ import { createClient } from '@supabase/supabase-js';
 // Supabase configuration
 // IMPORTANT: Replace these with your actual Supabase project credentials
 // Get these from: https://app.supabase.com/project/_/settings/api
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'YOUR_SUPABASE_URL';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'YOUR_SUPABASE_ANON_KEY';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
-// Create Supabase client
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-  },
-});
+// Check if Supabase is configured
+const isSupabaseConfigured = supabaseUrl && supabaseAnonKey && 
+  supabaseUrl.startsWith('http') && 
+  !supabaseUrl.includes('YOUR_SUPABASE');
+
+// Create Supabase client only if properly configured
+export const supabase = isSupabaseConfigured 
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+      },
+    })
+  : null;
+
+// Helper to check if Supabase is available
+export const isSupabaseAvailable = () => {
+  return supabase !== null;
+};
 
 // ============================================================================
 // DATABASE OPERATIONS
@@ -25,6 +37,12 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
  * @returns {Promise} Supabase response
  */
 export const saveMonthlyHistory = async (historyData, userId) => {
+  // Skip if Supabase not configured
+  if (!isSupabaseAvailable()) {
+    console.log('ℹ️ Supabase not configured. Using localStorage only.');
+    return { success: false, error: 'Supabase not configured' };
+  }
+
   try {
     // First, delete existing records for this user to avoid duplicates
     await supabase
@@ -66,6 +84,12 @@ export const saveMonthlyHistory = async (historyData, userId) => {
  * @returns {Promise} Array of monthly history records
  */
 export const loadMonthlyHistory = async (userId) => {
+  // Skip if Supabase not configured
+  if (!isSupabaseAvailable()) {
+    console.log('ℹ️ Supabase not configured. Using localStorage only.');
+    return [];
+  }
+
   try {
     const { data, error } = await supabase
       .from('monthly_history')

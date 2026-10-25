@@ -5,7 +5,7 @@ import LoginPage from './LoginPage';
 import { ReasonModal, CommentModal, EditMonthModal, ClearHistoryModal } from './Modals';
 import { createAuditLog, saveAuditLog, AUDIT_ACTIONS } from './AuditLog';
 import { 
-  supabase, 
+  isSupabaseAvailable,
   saveMonthlyHistory, 
   loadMonthlyHistory, 
   saveRecycleBin, 
@@ -205,6 +205,22 @@ function App() {
   useEffect(() => {
     const loadData = async () => {
       setIsLoadingFromSupabase(true);
+      
+      if (!isSupabaseAvailable()) {
+        // Supabase not configured, use localStorage only
+        console.log('ℹ️ Supabase not configured. Using localStorage only. Configure Supabase for cross-device sync.');
+        const saved = localStorage.getItem('vehicleAccountingHistory');
+        if (saved) {
+          try {
+            const localData = JSON.parse(saved);
+            setMonthlyHistory(localData);
+          } catch (e) {
+            console.error('Failed to load history:', e);
+          }
+        }
+        setIsLoadingFromSupabase(false);
+        return;
+      }
       
       // Try to load from Supabase first
       const userId = user?.username || 'default';
@@ -610,15 +626,19 @@ function App() {
     // Save to both localStorage (for backup) and Supabase (for sync)
     localStorage.setItem('vehicleAccountingHistory', JSON.stringify(newHistory));
     
-    // Save to Supabase for cloud sync
-    const userId = user?.username || 'default';
-    const result = await saveMonthlyHistory(newHistory, userId);
-    
-    if (result.success) {
-      console.log('✅ Saved to Supabase successfully');
+    // Save to Supabase for cloud sync (if configured)
+    if (isSupabaseAvailable()) {
+      const userId = user?.username || 'default';
+      const result = await saveMonthlyHistory(newHistory, userId);
+      
+      if (result.success) {
+        console.log('✅ Saved to Supabase successfully');
+      } else {
+        console.error('❌ Failed to save to Supabase:', result.error);
+        alert('Warning: Data saved locally but failed to sync to cloud. Please check your internet connection.');
+      }
     } else {
-      console.error('❌ Failed to save to Supabase:', result.error);
-      alert('Warning: Data saved locally but failed to sync to cloud. Please check your internet connection.');
+      console.log('ℹ️ Supabase not configured. Data saved to localStorage only. Configure Supabase for cross-device sync.');
     }
 
     // Carry forward net payouts to next month's previous balances
@@ -657,7 +677,8 @@ function App() {
       setSelectedMonth(MONTHS[currentMonthIndex + 1].value);
     }
 
-    alert('Month saved successfully! Balances carried forward to next month. Data synced to cloud.');
+    alert('Month saved successfully! Balances carried forward to next month.' + 
+      (isSupabaseAvailable() ? ' Data synced to cloud.' : ' Configure Supabase for cross-device sync.'));
   };
 
   /**
