@@ -3,8 +3,15 @@ import { createClient } from '@supabase/supabase-js';
 // Supabase configuration
 // IMPORTANT: Replace these with your actual Supabase project credentials
 // Get these from: https://app.supabase.com/project/_/settings/api
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+
+// Fallback to hardcoded values for Vercel deployment (temporary fix)
+let rawUrl = import.meta.env.VITE_SUPABASE_URL || 'https://kxnbsuyvjcjvkhnpqexk.supabase.co';
+// Auto-correct typo if 'yy' was entered instead of 'yv'
+if (rawUrl.includes('kxnbsuyyjcjvkhnpqexk')) {
+  rawUrl = rawUrl.replace('kxnbsuyyjcjvkhnpqexk', 'kxnbsuyvjcjvkhnpqexk');
+}
+const supabaseUrl = rawUrl;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt4bmJzdXl2amNqdmtobnBxZXhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5NzM0NzksImV4cCI6MjEwODU0OTQ3OX0.nPRXnfhNu17SFLz-mDfhHwn7c-DJ9ZF3QgZxkVUJVXs';
 
 // Check if Supabase is configured
 const isSupabaseConfigured = supabaseUrl && supabaseAnonKey && 
