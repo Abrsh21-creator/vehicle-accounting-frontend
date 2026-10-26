@@ -201,50 +201,47 @@ function App() {
   // Computed current month string
   const currentMonth = selectedMonth && selectedYear ? `${selectedMonth} ${selectedYear}` : '';
 
-  // Load history from Supabase (or fallback to localStorage for migration) on mount
+  // Load history from Supabase (REQUIRED - No localStorage fallback for production)
   useEffect(() => {
     const loadData = async () => {
       setIsLoadingFromSupabase(true);
       
       if (!isSupabaseAvailable()) {
-        // Supabase not configured, use localStorage only
-        console.log('ℹ️ Supabase not configured. Using localStorage only. Configure Supabase for cross-device sync.');
-        const saved = localStorage.getItem('vehicleAccountingHistory');
-        if (saved) {
-          try {
-            const localData = JSON.parse(saved);
-            setMonthlyHistory(localData);
-          } catch (e) {
-            console.error('Failed to load history:', e);
-          }
-        }
+        // Supabase is REQUIRED for production use
+        console.error('❌ Supabase is not configured! Data will not persist across devices.');
+        alert('⚠️ Database not configured! Please contact administrator to set up Supabase for data persistence.');
         setIsLoadingFromSupabase(false);
         return;
       }
       
-      // Try to load from Supabase first
+      // Load from Supabase (primary and only source for production)
       const userId = user?.username || 'default';
       const supabaseData = await loadMonthlyHistory(userId);
       
       if (supabaseData && supabaseData.length > 0) {
         // Data found in Supabase
-        console.log(`✅ Loaded ${supabaseData.length} records from Supabase`);
+        console.log(`✅ Loaded ${supabaseData.length} records from Supabase cloud database`);
         setMonthlyHistory(supabaseData);
       } else {
-        // No data in Supabase, check localStorage for migration
+        // Check localStorage for one-time migration only
         const saved = localStorage.getItem('vehicleAccountingHistory');
         if (saved) {
           try {
             const localData = JSON.parse(saved);
-            console.log(`📦 Found ${localData.length} records in localStorage, migrating to Supabase...`);
-            setMonthlyHistory(localData);
-            
-            // Migrate to Supabase
             if (localData.length > 0) {
-              await migrateFromLocalStorage(userId);
+              console.log(`📦 Migrating ${localData.length} records from localStorage to Supabase...`);
+              setMonthlyHistory(localData);
+              
+              // Migrate to Supabase
+              const migrationResult = await migrateFromLocalStorage(userId);
+              if (migrationResult.success) {
+                console.log('✅ Migration to Supabase completed successfully');
+                // Clear localStorage after successful migration
+                localStorage.removeItem('vehicleAccountingHistory');
+              }
             }
           } catch (e) {
-            console.error('Failed to load history:', e);
+            console.error('Failed to migrate history:', e);
           }
         }
       }
@@ -623,23 +620,26 @@ function App() {
     const newHistory = [monthData, ...monthlyHistory];
     setMonthlyHistory(newHistory);
     
-    // Save to both localStorage (for backup) and Supabase (for sync)
-    localStorage.setItem('vehicleAccountingHistory', JSON.stringify(newHistory));
-    
-    // Save to Supabase for cloud sync (if configured)
-    if (isSupabaseAvailable()) {
-      const userId = user?.username || 'default';
-      const result = await saveMonthlyHistory(newHistory, userId);
-      
-      if (result.success) {
-        console.log('✅ Saved to Supabase successfully');
-      } else {
-        console.error('❌ Failed to save to Supabase:', result.error);
-        alert('Warning: Data saved locally but failed to sync to cloud. Please check your internet connection.');
-      }
-    } else {
-      console.log('ℹ️ Supabase not configured. Data saved to localStorage only. Configure Supabase for cross-device sync.');
+    // PRODUCTION: Save to Supabase ONLY (required for multi-device sync)
+    if (!isSupabaseAvailable()) {
+      alert('❌ Error: Database not configured! Data cannot be saved. Please contact administrator.');
+      return;
     }
+    
+    // Save to Supabase for cloud sync (REQUIRED)
+    const userId = user?.username || 'default';
+    const result = await saveMonthlyHistory(newHistory, userId);
+    
+    if (!result.success) {
+      console.error('❌ Failed to save to Supabase:', result.error);
+      alert('❌ Failed to save data to cloud database. Please check your internet connection and try again.');
+      return;
+    }
+    
+    console.log('✅ Data saved to Supabase cloud database successfully');
+    
+    // Also save to localStorage as emergency backup only
+    localStorage.setItem('vehicleAccountingHistory', JSON.stringify(newHistory));
 
     // Carry forward net payouts to next month's previous balances
     setAmsaluPrevBalance(calculations.amsalu.netPayout.toString());
@@ -677,8 +677,7 @@ function App() {
       setSelectedMonth(MONTHS[currentMonthIndex + 1].value);
     }
 
-    alert('Month saved successfully! Balances carried forward to next month.' + 
-      (isSupabaseAvailable() ? ' Data synced to cloud.' : ' Configure Supabase for cross-device sync.'));
+    alert('Month saved successfully! Balances carried forward to next month. Data synced to cloud database.');
   };
 
   /**
