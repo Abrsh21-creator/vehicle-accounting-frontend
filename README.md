@@ -1,4 +1,6 @@
 # Vehicle Accounting Dashboard
+
+<!-- Deployment: Updated environment variables for Supabase -->
 ## የተሽከርካሪ የሂሳብ ማስተዳደሪያ
 
 A production-ready, highly accurate financial management system for shared commercial vehicle businesses in Ethiopia. Built with React, Vite, and Tailwind CSS.
